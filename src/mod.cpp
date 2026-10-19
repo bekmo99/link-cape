@@ -99,7 +99,7 @@ static ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*
         "Only draw the cape while Link is wearing the Hero's Clothes (not the Ordon clothes, Zora "
         "armor or Magic Armor).",
         sHeroVar);
-    addNumber(panel, "Length", "How long the cape is, from the collar to the hem.", sLengthVar, 40,
+    addNumber(panel, "Length", "How long the cape is, from the neck to the hem.", sLengthVar, 40,
         140, " units");
     addNumber(panel, "Stiffness",
         "How stiff the cloth below the waist is. Higher hugs his body more and sways less.",

@@ -190,9 +190,9 @@ void Packet_c::draw() {
 // data was made), so none of this depends on how the game orients its joints internally.
 // ---------------------------------------------------------------------------------------------
 
-constexpr int kRigid = 4;  // rows 0..kRigid are rigid (collar to waist)
+constexpr int kRigid = 5;  // rows 0..kRigid are rigid (neck to waist)
 constexpr int kIterations = 14;
-static_assert(kRigid + 1 == 5, "body_data.hpp was generated for 5 rigid rows");
+static_assert(kRigid + 1 == 6, "body_data.hpp was generated for 6 rigid rows");
 static_assert(kBodySphereCount == 180, "update mSphereSm in cape_actor.hpp");
 constexpr f32 kMaxSpeed = 30.0f;    // per-tick velocity clamp, keeps contact from launching the cloth
 constexpr f32 kDrag = 0.12f;        // fraction of velocity lost per tick
@@ -244,9 +244,8 @@ static Frame makeFrame(const V3& yRaw, const V3& side, f32 handed) {
 
 static void buildFrames(const V3* P, f32 handed, Frame* fr) {
     const V3 hip = normalized(P[17] - P[22], V3{1.0f, 0.0f, 0.0f});
-    const V3 chest = normalized(P[6] - P[11], V3{1.0f, 0.0f, 0.0f});
-    fr[0] = makeFrame(P[3] - P[2], chest, handed);     // chest
-    fr[1] = makeFrame(P[2] - P[1], chest, handed);     // spine
+    fr[0] = makeFrame(P[3] - P[2], hip, handed);       // chest
+    fr[1] = makeFrame(P[2] - P[1], hip, handed);       // spine
     fr[2] = makeFrame(P[2] - P[16], hip, handed);      // waist
     fr[3] = makeFrame(P[18] - P[19], hip, handed);     // left thigh
     fr[4] = makeFrame(P[23] - P[24], hip, handed);     // right thigh
@@ -428,7 +427,7 @@ int Cape_c::Execute() {
     // Make sure "forward" in the frames really is forward in the game's world.
     f32 handed = 1.0f;
     {
-        const V3 chestSide = normalized(P[6] - P[11], V3{1.0f, 0.0f, 0.0f});
+        const V3 chestSide = normalized(P[17] - P[22], V3{1.0f, 0.0f, 0.0f});
         const V3 chestUp = normalized(P[3] - P[2], up);
         const V3 chestX = normalized(chestSide - chestUp * dot(chestSide, chestUp), chestSide);
         if (dot(cross(chestX, chestUp), forward) < 0.0f) {
@@ -437,6 +436,54 @@ int Cape_c::Execute() {
     }
     Frame fr[kNumGroups];
     buildFrames(P, handed, fr);
+
+    // Spine, chest and waist take their orientation straight from the game's joint matrices, so the
+    // pinned part of the cape follows their twist too. Which matrix column is which axis is not
+    // documented, so it is worked out once, while he is standing upright and still.
+    {
+        const V3 hipSide = normalized(P[17] - P[22], V3{1.0f, 0.0f, 0.0f});
+        const int joints[3] = {1, 2, 16};
+        const V3 refUp[3] = {P[2] - P[1], P[3] - P[2], P[2] - P[16]};
+        const int groups[3] = {1, 0, 2};
+        const bool upright = dot(normalized(P[3] - P[2], up), up) > 0.9f &&
+                             dot(normalized(P[2] - P[16], up), up) > 0.85f && link->speedF < 0.5f;
+        for (int a = 0; a < 3; a++) {
+            MtxP m = link->mpLinkModel->getAnmMtx(joints[a]);
+            V3 col[3];
+            for (int k = 0; k < 3; k++) {
+                col[k] = normalized(V3{m[0][k], m[1][k], m[2][k]}, V3{0.0f, 1.0f, 0.0f});
+            }
+            if (!mAxValid[a] && upright) {
+                const V3 ru = normalized(refUp[a], up);
+                int iu = 0;
+                for (int k = 1; k < 3; k++) {
+                    if (std::fabs(dot(col[k], ru)) > std::fabs(dot(col[iu], ru))) {
+                        iu = k;
+                    }
+                }
+                int is = iu == 0 ? 1 : 0;
+                for (int k = 0; k < 3; k++) {
+                    if (k != iu && std::fabs(dot(col[k], hipSide)) > std::fabs(dot(col[is], hipSide))) {
+                        is = k;
+                    }
+                }
+                if (std::fabs(dot(col[iu], ru)) > 0.8f && std::fabs(dot(col[is], hipSide)) > 0.8f) {
+                    mAxUp[a] = iu;
+                    mAxSide[a] = is;
+                    mAxUpSign[a] = dot(col[iu], ru) < 0.0f ? -1.0f : 1.0f;
+                    mAxSideSign[a] = dot(col[is], hipSide) < 0.0f ? -1.0f : 1.0f;
+                    mAxValid[a] = true;
+                }
+            }
+            if (mAxValid[a]) {
+                Frame f;
+                f.y = col[mAxUp[a]] * mAxUpSign[a];
+                f.x = col[mAxSide[a]] * mAxSideSign[a];
+                f.z = cross(f.x, f.y) * handed;
+                fr[groups[a]] = f;
+            }
+        }
+    }
 
     // Body spheres in world space
     // The spheres are low-pass filtered over time: the tunic flap and legs swing quickly, and
@@ -508,7 +555,7 @@ int Cape_c::Execute() {
     // Straight down from the waist row, pushed out of his body where it is in the way. The
     // constraint lengths come from this shape, so the bumps of his tunic and boots don't stretch
     // the cloth, and the cloth is gently pulled toward it (see Stiffness).
-    const f32 hipLen = 28.5f;  // collar-to-waist span of the rigid part
+    const f32 hipLen = 37.0f;  // neck-to-waist span of the rigid part
     const f32 vRestLow = (gTuning.length > hipLen + 20.0f ? gTuning.length - hipLen : 20.0f) /
                          (kRows - 1 - kRigid);
     const f32 groundY = link->current.pos.y + 2.0f;
@@ -516,10 +563,17 @@ int Cape_c::Execute() {
     for (int r = kRigid + 1; r < kRows; r++) {
         const f32 k = static_cast<f32>(r - kRigid);
         const f32 widen = 1.0f + kWiden * k / (kRows - 1 - kRigid);
+        // How far behind the waist row the cloth hangs at this height (it drapes over his tunic
+        // flap, then falls straight down from the flap's lowest edge).
+        f32 yb = (kHipY - vRestLow * k) / kEnvStep;
+        yb = yb < 0.0f ? 0.0f : (yb > kEnvRows - 1.001f ? kEnvRows - 1.001f : yb);
+        const int y0 = static_cast<int>(yb);
+        const f32 fy = yb - static_cast<f32>(y0);
         for (int c = 0; c < kCols; c++) {
             const V3& h = rest[kRigid * kCols + c];
-            V3 p = h + (h - mid) * (widen - 1.0f) + up * (-vRestLow * k) + back * (k * 0.3f);
-            resolveBody(p, 3);
+            const f32 depth = kEnvDepth[y0][c] * (1.0f - fy) + kEnvDepth[y0 + 1][c] * fy;
+            V3 p = h + (h - mid) * (widen - 1.0f) + up * (-vRestLow * k) + back * depth;
+            resolveBody(p, 2);
             if (p.y < groundY) {
                 p.y = groundY;
             }

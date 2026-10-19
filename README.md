@@ -10,14 +10,14 @@ his shoulders.
 ## How it works
 
 This cape is made for one model: the Hylian-armor Link model (blue tunic with gold trim, worn as the
-Hero's Clothes). It does not draw on any other model or outfit. The top of the cape sits at the shoulders, under the collar.
+Hero's Clothes). It does not draw on any other model or outfit. The top of the cape sits just under the neck, tucked under the collar.
 
 - The mod registers a custom actor (`lnkcape`) through Dusklight's `ActorService` and spawns it as a child of
   Link whenever he exists. It deletes itself when Link goes away (stage changes, game over) and the mod respawns it.
 - The model's back was measured offline (`tools/gen_body_data.py` reads the model's `.dae` and writes
   `src/body_data.hpp`).
-- **Collar to waist is pinned.** Those cape points are stored relative to Link's chest and waist and just carried
-  along by them: no physics, so the top can never pull away from his back. The cape's top edge sits under the collar.
+- **Neck to waist is pinned.** Those cape points are stored relative to Link's chest and waist and just carried
+  along by them: no physics, so the top can never pull away from his back. The top edge sits just under the neck, under the collar.
 - **Below the waist it hangs and flows.** The cloth is a small Verlet simulation that falls from the waist row. Link's
   tunic flap, legs and boots are about 180 small spheres glued to his skeleton, so the cloth can't pass through them.
   Gear stowed on his back (shield, sheath, sword) goes over the cape.

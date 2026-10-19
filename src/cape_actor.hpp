@@ -80,6 +80,14 @@ private:
     f32 mStream = 0.0f;  // smoothed run-speed push
     V3 mSphereSm[180];   // body collision spheres, smoothed over time (kBodySphereCount)
     bool mSphereInit = false;
+    // Which column of the spine / chest / waist joint matrices is "side" and "up", worked out once
+    // while he stands still (index 0 = spine, 1 = chest, 2 = waist). Lets the pinned top follow the
+    // real orientation of those joints, twist included.
+    bool mAxValid[3] = {false, false, false};
+    int mAxUp[3] = {0, 0, 0};
+    int mAxSide[3] = {0, 0, 0};
+    f32 mAxUpSign[3] = {1.0f, 1.0f, 1.0f};
+    f32 mAxSideSign[3] = {1.0f, 1.0f, 1.0f};
 };
 
 }  // namespace lnkcape

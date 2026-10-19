@@ -111,6 +111,18 @@ for i in inc:
     for k,p in enumerate(Pw):
         ws=sorted(sk['W'][k],key=lambda t:-t[1]); V.append(p); DJ.append(jid[ws[0][0]])
 V=np.array(V);DJ=np.array(DJ)
+CHEST_J=set(range(2,16))
+def grp_w(ws):
+    g=np.zeros(3)  # chest, spine, waist
+    for n,w in ws:
+        j=jid[n]
+        g[0 if j in CHEST_J else (1 if j==1 else 2)]+=w
+    return g/max(g.sum(),1e-9)
+VW=[]
+for i in inc:
+    gid='meshId%d'%i; sk=skins[gid]
+    for k in range(len(meshes[gid]['P'])): VW.append(grp_w(sk['W'][k]))
+VW=np.array(VW)
 print('verts',len(V), 'bsm0',np.round(skins['meshId3']['bsm'],2).tolist()[0])
 raw=np.vstack([meshes['meshId3']['P']]); print('raw vs world range', raw.min(0), V.min(0))
 
@@ -149,9 +161,14 @@ for r in range(kRigid+1):
                 if z is not None: zs.append(z)
         z=min(zs) if zs else -10.0
         z=max(-13.0,min(-3.0,z))
-        p=np.array([x,y,z-0.8])
+        # the top rows sink into the body so a little drift in motion stays hidden under the mesh
+        off=[+3.0,+1.5,0.0,-0.8,-0.8][r]
+        p=np.array([x,y,z+off])
         pts.append(p)
-        rigid.append((to_local(2,p),to_local(16,p)))
+        # skin weights: average of the nearest body vertices' weights (chest / spine / waist)
+        d=np.linalg.norm(V-p,axis=1); nn=np.argsort(d)[:8]
+        wgt=VW[nn].mean(axis=0); wgt=wgt/wgt.sum()
+        rigid.append((to_local(2,p),to_local(1,p),to_local(16,p),wgt))
 pts=np.array(pts)
 
 out=[]
@@ -163,17 +180,11 @@ for j,l,r in sph:
     out.append("    {%d, %d, {%.3ff, %.3ff, %.3ff}, %.2ff},\n"%(j,GROUPS.index(GROUP[j]),l[0],l[1],l[2],r))
 out.append("};\n\n")
 out.append("// Rigid cape rows (top = row 0, hip = last): each point stored relative to the chest and the waist.\n")
-out.append("struct RigidPoint { float chest[3]; float waist[3]; };\n")
+out.append("struct RigidPoint { float chest[3]; float spine[3]; float waist[3]; float w[3]; };\n")
 out.append("constexpr int kRigidPointCount = %d;\nconstexpr RigidPoint kRigidPoints[kRigidPointCount] = {\n"%len(rigid))
-for lc,lw in rigid:
-    out.append("    {{%.3ff, %.3ff, %.3ff}, {%.3ff, %.3ff, %.3ff}},\n"%(*lc,*lw))
+for lc,ls,lw,wg in rigid:
+    out.append("    {{%.3ff, %.3ff, %.3ff}, {%.3ff, %.3ff, %.3ff}, {%.3ff, %.3ff, %.3ff}, {%.3ff, %.3ff, %.3ff}},\n"%(*lc,*ls,*lw,*wg))
 out.append("};\n")
-# blend weights of chest per rigid row
-ws=[]
-for r in range(kRigid+1):
-    y=Y_TOP+(Y_HIP-Y_TOP)*r/kRigid
-    ws.append(max(0.0,min(1.0,(y-103.0)/(124.0-103.0))))
-out.append("constexpr float kRigidChestWeight[%d] = {%s};\n"%(kRigid+1,", ".join("%.3ff"%w for w in ws)))
 out.append("\n}  // namespace lnkcape\n")
 open(sys.argv[2],'w').write("".join(out))
 print(len(sph),len(rigid),ws)

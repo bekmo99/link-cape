@@ -193,10 +193,11 @@ void Packet_c::draw() {
 constexpr int kRigid = 4;  // rows 0..kRigid are rigid (collar to waist)
 constexpr int kIterations = 14;
 static_assert(kRigid + 1 == 5, "body_data.hpp was generated for 5 rigid rows");
+static_assert(kBodySphereCount == 180, "update mSphereSm in cape_actor.hpp");
 constexpr f32 kMaxSpeed = 30.0f;    // per-tick velocity clamp, keeps contact from launching the cloth
 constexpr f32 kDrag = 0.12f;        // fraction of velocity lost per tick
 constexpr f32 kGravity = 0.9f;      // units per tick^2
-constexpr f32 kRunStream = 0.012f;  // extra backward push per unit of Link's forward speed
+constexpr f32 kRunStream = 0.007f;  // extra backward push per unit of Link's forward speed
 constexpr f32 kWiden = 0.20f;       // how much wider the hem is than the hips
 constexpr f32 kSkin = 1.0f;         // the cloth rides this far outside the body
 
@@ -438,12 +439,21 @@ int Cape_c::Execute() {
     buildFrames(P, handed, fr);
 
     // Body spheres in world space
+    // The spheres are low-pass filtered over time: the tunic flap and legs swing quickly, and
+    // letting the cloth chase every twitch made the hem warp.
     Sphere spheres[kBodySphereCount];
     for (int i = 0; i < kBodySphereCount; i++) {
         const BodySphere& b = kBodySpheres[i];
-        spheres[i].c = fromLocal(P[b.joint], fr[b.group], b.l);
+        const V3 target = fromLocal(P[b.joint], fr[b.group], b.l);
+        if (!mSphereInit) {
+            mSphereSm[i] = target;
+        } else {
+            mSphereSm[i] = mSphereSm[i] + (target - mSphereSm[i]) * 0.6f;
+        }
+        spheres[i].c = mSphereSm[i];
         spheres[i].r = b.r + kSkin;
     }
+    mSphereInit = true;
 
     // Gear stowed on his back (shield, sheath, sword) goes OVER the cape.
     Box allBoxes[kMaxBoxes];
@@ -485,12 +495,12 @@ int Cape_c::Execute() {
     // --- Rigid part: carried by the chest and waist ------------------------------------------
     V3 rest[kCount];
     for (int r = 0; r <= kRigid; r++) {
-        const f32 w = kRigidChestWeight[r];
         for (int c = 0; c < kCols; c++) {
             const RigidPoint& rp = kRigidPoints[r * kCols + c];
-            const V3 a = fromLocal(P[2], fr[0], rp.chest);
-            const V3 b = fromLocal(P[16], fr[2], rp.waist);
-            rest[r * kCols + c] = a * w + b * (1.0f - w);
+            // Linear blend skinning with the chest, spine and waist, like the body mesh itself.
+            rest[r * kCols + c] = fromLocal(P[2], fr[0], rp.chest) * rp.w[0] +
+                                  fromLocal(P[1], fr[1], rp.spine) * rp.w[1] +
+                                  fromLocal(P[16], fr[2], rp.waist) * rp.w[2];
         }
     }
 
@@ -522,6 +532,7 @@ int Cape_c::Execute() {
     if (!mSimInit || length(linkPos - mLastLinkPos) > 400.0f) {
         resetSim(rest);
         mPacket.mSnap = true;
+        mSphereInit = false;
     }
     mLastLinkPos = linkPos;
 
@@ -550,7 +561,7 @@ int Cape_c::Execute() {
             // The hem is looser than the top of the hanging part: it is pulled back to the resting
             // shape less and streams out more, so the bottom flows.
             const f32 loose = rowT * rowT;
-            p = p + vel + V3{0.0f, -kGravity, 0.0f} + back * (stream * (0.3f + 2.2f * loose));
+            p = p + vel + V3{0.0f, -kGravity, 0.0f} + back * (stream * (0.3f + 1.2f * loose));
             p = p + (rest[i] - p) * (spring * (1.0f - 0.85f * loose));
         }
     }
@@ -582,9 +593,18 @@ int Cape_c::Execute() {
                 }
             }
         }
+        const f32 push = it >= kIterations - 3 ? 1.0f : 0.6f;  // soft at first, exact at the end
         for (int r = kRigid + 1; r < kRows; r++) {
             for (int c = 0; c < kCols; c++) {
                 V3& p = mP[r * kCols + c];
+                // Hanging cloth never rises above the row it hangs from: no floating up while he
+                // runs or when the legs kick it.
+                {
+                    const f32 maxY = mP[(r - 1) * kCols + c].y - 0.35f * vRestLow;
+                    if (p.y > maxY) {
+                        p.y = maxY;
+                    }
+                }
                 const V3 before = p;
                 V3 hitN = {0.0f, 0.0f, 0.0f};
                 bool hit = false;
@@ -595,12 +615,14 @@ int Cape_c::Execute() {
                         hitN = hitN + n;
                     }
                 }
+                const V3 preSphere = p;
                 for (int k = 0; k < kBodySphereCount; k++) {
                     if (collideSphere(p, spheres[k], back)) {
                         hit = true;
                         hitN = hitN + back;
                     }
                 }
+                p = preSphere + (p - preSphere) * push;
                 if (hit) {
                     // Remove the velocity going into the body and add a little friction.
                     V3& pv = mPrev[r * kCols + c];
@@ -657,7 +679,9 @@ int Cape_c::Execute() {
     for (int r = 0; r < kRows; r++) {
         for (int c = 0; c < kCols; c++) {
             const int i = r * kCols + c;
-            mPacket.mPos[i] = mP[i];
+            // Light smoothing of what is drawn, for the hanging part only.
+            const bool smooth = r > kRigid && !mPacket.mSnap;
+            mPacket.mPos[i] = smooth ? mPacket.mPos[i] + (mP[i] - mPacket.mPos[i]) * 0.65f : mP[i];
             mPacket.mNrm[i] = normalized(gridNormal(r, c) * sign, back);
         }
     }

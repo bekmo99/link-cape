@@ -78,6 +78,8 @@ private:
     V3 mLastLinkPos;
     bool mSimInit;
     f32 mStream = 0.0f;  // smoothed run-speed push
+    V3 mSphereSm[180];   // body collision spheres, smoothed over time (kBodySphereCount)
+    bool mSphereInit = false;
 };
 
 }  // namespace lnkcape

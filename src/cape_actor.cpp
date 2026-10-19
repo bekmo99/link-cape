@@ -162,7 +162,8 @@ void Packet_c::draw() {
 // Simulation
 // ---------------------------------------------------------------------------------------------
 
-constexpr int kIterations = 8;
+constexpr int kIterations = 10;
+constexpr f32 kMaxSpeed = 30.0f;  // per-tick velocity clamp, keeps contact from launching the cloth
 constexpr f32 kDrag = 0.06f;      // fraction of velocity lost per tick
 constexpr f32 kGravity = 1.4f;    // units per tick^2
 constexpr f32 kRunStream = 0.025f;  // extra backward push per unit of Link's forward speed
@@ -211,7 +212,7 @@ static int buildColliders(daAlink_c* link, f32 pad, Capsule* out) {
     auto add = [&](int ja, int jb, f32 r) {
         out[n++] = {jointPos(link, ja), jointPos(link, jb), r + pad};
     };
-    add(1, 3, 15.0f);                 // torso: lower spine up to the neck
+    add(1, 3, 12.0f);                 // torso: lower spine up to the neck
     add(16, 16, 15.0f);               // hips
     add(7, 7, 9.0f);                  // shoulders (upper arm roots)
     add(12, 12, 9.0f);
@@ -228,8 +229,8 @@ static int buildColliders(daAlink_c* link, f32 pad, Capsule* out) {
     return n;
 }
 
-// Pushes p out of the capsule. Returns true if it moved.
-static bool collideCapsule(V3& p, const Capsule& c) {
+// Pushes p out of the capsule. Returns true if it moved, with the outward normal in n.
+static bool collideCapsule(V3& p, const Capsule& c, V3& n) {
     const V3 ab = c.b - c.a;
     const f32 len2 = dot(ab, ab);
     f32 t = len2 > 1e-6f ? dot(p - c.a, ab) / len2 : 0.0f;
@@ -240,7 +241,95 @@ static bool collideCapsule(V3& p, const Capsule& c) {
     if (dist >= c.r) {
         return false;
     }
-    p = q + (dist > 1e-4f ? d * (1.0f / dist) : V3{0.0f, 0.0f, -1.0f}) * c.r;
+    n = dist > 1e-4f ? d * (1.0f / dist) : V3{0.0f, 0.0f, -1.0f};
+    p = q + n * c.r;
+    return true;
+}
+
+// Oriented boxes for the gear on Link's back (sheath, sword, shield): the joint bounding boxes of
+// those models, placed with their live joint matrices.
+struct Box {
+    V3 origin;
+    V3 axis[3];   // unit axes in world space
+    f32 scale[3]; // world length of one local unit along each axis
+    V3 mn, mx;    // local-space bounds
+    f32 r;
+};
+
+constexpr int kMaxBoxes = 12;
+
+static void addModelBoxes(J3DModel* model, f32 pad, Box* out, int& n) {
+    if (model == nullptr || model->getModelData() == nullptr) {
+        return;
+    }
+    J3DModelData* data = model->getModelData();
+    const int joints = data->getJointNum();
+    for (int j = 0; j < joints && j < 4 && n < kMaxBoxes; j++) {
+        J3DJoint* joint = data->getJointNodePointer(j);
+        if (joint == nullptr) {
+            continue;
+        }
+        MtxP m = model->getAnmMtx(j);
+        Box b;
+        b.origin = {m[0][3], m[1][3], m[2][3]};
+        for (int k = 0; k < 3; k++) {
+            const V3 col = {m[0][k], m[1][k], m[2][k]};
+            b.scale[k] = length(col);
+            b.axis[k] = normalized(col, V3{k == 0 ? 1.0f : 0.0f, k == 1 ? 1.0f : 0.0f, k == 2 ? 1.0f : 0.0f});
+        }
+        const Vec* mn = joint->getMin();
+        const Vec* mx = joint->getMax();
+        b.mn = {mn->x, mn->y, mn->z};
+        b.mx = {mx->x, mx->y, mx->z};
+        // Joints with no geometry (or an unset box) get a small default box instead.
+        if (mx->x - mn->x < 1.0f && mx->y - mn->y < 1.0f && mx->z - mn->z < 1.0f) {
+            b.mn = {-6.0f, -6.0f, -6.0f};
+            b.mx = {6.0f, 6.0f, 6.0f};
+        }
+        b.r = pad;
+        out[n++] = b;
+    }
+}
+
+static bool collideBox(V3& p, const Box& b, V3& nOut) {
+    const V3 rel = p - b.origin;
+    f32 l[3];
+    f32 lo[3];
+    f32 hi[3];
+    f32 rad[3];
+    for (int k = 0; k < 3; k++) {
+        const f32 s = b.scale[k] > 1e-4f ? b.scale[k] : 1.0f;
+        l[k] = dot(rel, b.axis[k]) / s;
+        rad[k] = b.r / s;
+        lo[k] = (k == 0 ? b.mn.x : (k == 1 ? b.mn.y : b.mn.z)) - rad[k];
+        hi[k] = (k == 0 ? b.mx.x : (k == 1 ? b.mx.y : b.mx.z)) + rad[k];
+    }
+    if (l[0] <= lo[0] || l[0] >= hi[0] || l[1] <= lo[1] || l[1] >= hi[1] || l[2] <= lo[2] ||
+        l[2] >= hi[2])
+    {
+        return false;
+    }
+    // Inside the padded box: leave through the nearest face.
+    int axisK = 0;
+    f32 best = 1e30f;
+    f32 dir = 1.0f;
+    for (int k = 0; k < 3; k++) {
+        const f32 s = b.scale[k] > 1e-4f ? b.scale[k] : 1.0f;
+        const f32 dLo = (l[k] - lo[k]) * s;
+        const f32 dHi = (hi[k] - l[k]) * s;
+        if (dLo < best) {
+            best = dLo;
+            axisK = k;
+            dir = -1.0f;
+        }
+        if (dHi < best) {
+            best = dHi;
+            axisK = k;
+            dir = 1.0f;
+        }
+    }
+    nOut = b.axis[axisK] * dir;
+    p = p + nOut * best;
     return true;
 }
 
@@ -294,7 +383,9 @@ int Cape_c::Execute() {
         return 1;
     }
 
-    mPacket.mVisible = gTuning.enabled && !link->checkWolf();
+    const bool heroClothes = dComIfGs_getSelectEquipClothes() == dItemNo_WEAR_KOKIRI_e;
+    mPacket.mVisible = gTuning.enabled && !link->checkWolf() &&
+                       (!gTuning.heroOnly || heroClothes);
     current.pos = link->current.pos;  // used for the lighting lookup
 
     // --- Link's pose -------------------------------------------------------------------------
@@ -325,6 +416,16 @@ int Cape_c::Execute() {
     Capsule caps[kMaxCaps];
     const int capCount = buildColliders(link, gTuning.padding, caps);
 
+    Box boxes[kMaxBoxes];
+    int boxCount = 0;
+    if (link->checkShieldGet()) {
+        addModelBoxes(link->mShieldModel, gTuning.padding, boxes, boxCount);
+    }
+    if (link->checkSwordGet()) {
+        addModelBoxes(link->mSheathModel, gTuning.padding, boxes, boxCount);
+        addModelBoxes(link->mSwordModel, gTuning.padding, boxes, boxCount);
+    }
+
     const f32 vRest = gTuning.length / (kRows - 1);
 
     // Teleports (stage change, warp, respawn): start over instead of stretching across the map.
@@ -335,13 +436,20 @@ int Cape_c::Execute() {
     mLastLinkPos = linkPos;
 
     // --- Integrate ---------------------------------------------------------------------------
-    const f32 stream = link->speedF > 0.0f ? link->speedF * kRunStream : 0.0f;
+    // Smoothed so starting / stopping doesn't snap the cape backward.
+    const f32 streamTarget = link->speedF > 0.0f ? link->speedF * kRunStream : 0.0f;
+    mStream += (streamTarget - mStream) * 0.2f;
+    const f32 stream = mStream;
     for (int r = 1; r < kRows; r++) {
         const f32 rowT = static_cast<f32>(r) / (kRows - 1);
         for (int c = 0; c < kCols; c++) {
             V3& p = mP[r * kCols + c];
             V3& prev = mPrev[r * kCols + c];
-            const V3 vel = (p - prev) * (1.0f - kDrag);
+            V3 vel = (p - prev) * (1.0f - kDrag);
+            const f32 speed = length(vel);
+            if (speed > kMaxSpeed) {
+                vel = vel * (kMaxSpeed / speed);
+            }
             prev = p;
             p = p + vel + V3{0.0f, -kGravity, 0.0f} + back * (stream * rowT);
         }
@@ -379,12 +487,36 @@ int Cape_c::Execute() {
                 if (depth < -gTuning.wrap - 1.0f) {
                     p = p + back * (-gTuning.wrap - 1.0f - depth);
                 }
-                for (int k = 0; k < capCount; k++) {
-                    if (collideCapsule(p, caps[k])) {
-                        // a little friction so the cloth rests on the body instead of bouncing
-                        V3& pv = mPrev[r * kCols + c];
-                        pv = pv + (p - pv) * 0.25f;
+                const V3 before = p;
+                V3 hitN = {0.0f, 0.0f, 0.0f};
+                bool hit = false;
+                V3 n;
+                // Rows 0-1 hang from the (pinned) anchors, which may sit inside the padded body
+                // shapes; colliding them would only fight the pins and make the top shake.
+                if (r >= 2) {
+                    for (int k = 0; k < capCount; k++) {
+                        if (collideCapsule(p, caps[k], n)) {
+                            hit = true;
+                            hitN = hitN + n;
+                        }
                     }
+                    for (int k = 0; k < boxCount; k++) {
+                        if (collideBox(p, boxes[k], n)) {
+                            hit = true;
+                            hitN = hitN + n;
+                        }
+                    }
+                }
+                if (hit) {
+                    // Remove the velocity going into the body and add a little friction.
+                    V3& pv = mPrev[r * kCols + c];
+                    V3 v = before - pv;
+                    const V3 nn = normalized(hitN, V3{0.0f, 0.0f, -1.0f});
+                    const f32 vn = dot(v, nn);
+                    if (vn < 0.0f) {
+                        v = v - nn * vn;
+                    }
+                    pv = p - v * 0.85f;
                 }
                 if (p.y < groundY) {
                     p.y = groundY;
@@ -408,10 +540,11 @@ int Cape_c::Execute() {
         const V3 dy = mP[r1 * kCols + c] - mP[r0 * kCols + c];
         return cross(dy, dx);
     };
-    const V3 mid = gridNormal(kRows / 2, kCols / 2);
-    const bool windingInward = dot(mid, back) < 0.0f;
-    const f32 sign = windingInward ? -1.0f : 1.0f;
-    mPacket.mFlip = windingInward != gTuning.flipFaces;
+    // With the grid laid out left-to-right, top-to-bottom, dy x dx points straight away from
+    // Link's back, so the outside / winding choice is fixed (deciding it from the live cloth made
+    // it flicker whenever the cape swung edge-on).
+    const f32 sign = 1.0f;
+    mPacket.mFlip = gTuning.flipFaces;
 
     for (int r = 0; r < kRows; r++) {
         for (int c = 0; c < kCols; c++) {

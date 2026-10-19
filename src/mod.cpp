@@ -26,6 +26,7 @@ using lnkcape::gTuning;
 
 static ConfigVarHandle sShowVar = 0;
 static ConfigVarHandle sFlipVar = 0;
+static ConfigVarHandle sHeroVar = 0;
 static ConfigVarHandle sUpVar = 0;
 static ConfigVarHandle sBackVar = 0;
 static ConfigVarHandle sHalfWidthVar = 0;
@@ -54,6 +55,9 @@ static void refreshTuning() {
     int64_t i = 0;
     if (svc_config->get_bool(mod_ctx, sShowVar, &b) == MOD_OK) {
         gTuning.enabled = b;
+    }
+    if (svc_config->get_bool(mod_ctx, sHeroVar, &b) == MOD_OK) {
+        gTuning.heroOnly = b;
     }
     if (svc_config->get_bool(mod_ctx, sFlipVar, &b) == MOD_OK) {
         gTuning.flipFaces = b;
@@ -107,6 +111,10 @@ static void addToggle(UiElementHandle panel, const char* label, const char* help
 static ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*) {
     svc_ui->pane_add_section(mod_ctx, panel, "Cape");
     addToggle(panel, "Show cape", "Turns Link's cape on or off.", sShowVar);
+    addToggle(panel, "Hero's Clothes only",
+        "Only draw the cape while Link is wearing the Hero's Clothes (not the Ordon clothes, Zora "
+        "armor or Magic Armor).",
+        sHeroVar);
     addNumber(panel, "Length", "How long the cape is.", sLengthVar, 20, 250, " units");
 
     svc_ui->pane_add_section(mod_ctx, panel, "Fit");
@@ -179,6 +187,7 @@ extern "C" {
 MOD_EXPORT ModResult mod_initialize(ModError*) {
     if (registerBool("show_cape", true, &sShowVar) != MOD_OK ||
         registerBool("flip_faces", false, &sFlipVar) != MOD_OK ||
+        registerBool("hero_only", true, &sHeroVar) != MOD_OK ||
         registerInt("anchor_up", 10, &sUpVar) != MOD_OK ||
         registerInt("anchor_back", 14, &sBackVar) != MOD_OK ||
         registerInt("half_width", 22, &sHalfWidthVar) != MOD_OK ||

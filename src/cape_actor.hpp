@@ -12,8 +12,8 @@
 namespace lnkcape {
 
 // Cloth grid: kCols strands across, kRows nodes down each strand.
-constexpr int kCols = 9;
-constexpr int kRows = 12;
+constexpr int kCols = 13;
+constexpr int kRows = 16;
 constexpr int kCount = kCols * kRows;
 
 struct V3 {
@@ -23,6 +23,7 @@ struct V3 {
 // Live tuning values. mod.cpp refreshes these from the mod's config vars every frame.
 struct Tuning {
     bool enabled = true;
+    bool heroOnly = true;    // only show the cape while Link wears the Hero's Clothes
     bool flipFaces = false;  // swap which side of the cloth counts as "outside" (see README)
     f32 anchorUp = 10.0f;    // anchor height above Link's spine joint (backbone2)
     f32 anchorBack = 14.0f;  // anchor distance behind the spine joint
@@ -68,6 +69,7 @@ private:
     V3 mPrev[kCount];
     V3 mLastLinkPos;
     bool mSimInit;
+    f32 mStream = 0.0f;  // smoothed run-speed push
 };
 
 }  // namespace lnkcape

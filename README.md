@@ -12,7 +12,7 @@ his shoulders.
 - The mod registers a custom actor (`lnkcape`) through Dusklight's `ActorService` and spawns it as a child of
   Link whenever he exists. It deletes itself when Link goes away (stage changes, game over) and the mod respawns it.
 - Each game tick the cape reads the position of Link's upper spine joint (`backbone2`), works out two shoulder
-  attachment points behind it, and runs a small Verlet cloth simulation (9 x 12 grid) hanging from them. The cloth
+  attachment points behind it, and runs a small Verlet cloth simulation (13 x 16 grid) hanging from them. The cloth
   stays behind Link's back, doesn't sink below his feet, and streams out behind him when he runs.
 - It is drawn with the same GX set-up the game's own cloak actor uses (one TEV stage, scene lighting), so it picks up
   the area's lighting. It is hidden in wolf form.
@@ -49,6 +49,7 @@ his body. Open the **Mods** window, select *Link's Cape*, and adjust:
 | Distance behind back | Moves them away from his back (increase if the cape is inside him) |
 | Half width | Half the distance between the two attachment points |
 | Length | How long the cape is |
+| Hero's Clothes only | Only show the cape while Link wears the Hero's Clothes (on by default) |
 | Shoulder wrap | How far the top corners curl forward over the shoulders (0 = flat) |
 | Body padding | Extra clearance around Link's body colliders; raise it if the cape clips his shield, sword or bulky outfits |
 
@@ -82,7 +83,7 @@ how wide the hem flares, ...) are the place.
 - The cape updates once per game tick and is not interpolated, so at high frame rates its motion can look a little
   steppier than Link's. Dusklight v2.0.2 has no mod-side interpolation service.
 - Collision is a set of capsules fitted to Link's torso, hips, arms and legs, plus the ground height at his feet. The
-  stowed shield and sword are not separate colliders (use *Body padding*), and it does not know about walls. It can
+  sword, sheath and shield on his back are boxes taken from those models' own bounds, and it does not know about walls. It can
   still clip when he crawls, rolls, swims or rides.
 - It does not react to Link's sword or shield, only to his position and facing.
 

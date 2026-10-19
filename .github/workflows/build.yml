@@ -92,12 +92,14 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          # Surface compiler/linker errors as annotations so they show up on the run summary page.
-          grep -E 'error|fatal|LNK[0-9]+|undefined reference|unresolved' build.log | head -30 | while IFS= read -r line; do
-            line="${line//$'\r'/}"
-            line="${line//'%'/%25}"
-            echo "::error::${line:0:1500}"
-          done
+          # Surface compiler/linker errors (with context) as annotations on the run summary page.
+          tr -d '\r' < build.log > build.clean.log
+          first=$(grep -n -m1 -E 'error|fatal|LNK[0-9]+|undefined reference|unresolved' build.clean.log | cut -d: -f1)
+          start=$(( first > 12 ? first - 12 : 1 ))
+          msg=$(sed -n "${start},$((first + 30))p" build.clean.log | cut -c1-400)
+          msg="${msg//'%'/%25}"
+          msg="${msg//$'\n'/%0A}"
+          echo "::error::${msg:0:6000}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

@@ -49,6 +49,8 @@ his body. Open the **Mods** window, select *Link's Cape*, and adjust:
 | Distance behind back | Moves them away from his back (increase if the cape is inside him) |
 | Half width | Half the distance between the two attachment points |
 | Length | How long the cape is |
+| Shoulder wrap | How far the top corners curl forward over the shoulders (0 = flat) |
+| Body padding | Extra clearance around Link's body colliders; raise it if the cape clips his shield, sword or bulky outfits |
 
 Values are saved in the game's `config.json` under `mod.com.bekmo99.link_cape.*`.
 
@@ -79,8 +81,9 @@ how wide the hem flares, ...) are the place.
 - Not tested in game yet (see above).
 - The cape updates once per game tick and is not interpolated, so at high frame rates its motion can look a little
   steppier than Link's. Dusklight v2.0.2 has no mod-side interpolation service.
-- Collision is a single plane behind Link's back plus the ground height at his feet. The cape can clip through him
-  when he crawls, rolls, swims or rides, and it does not know about walls.
+- Collision is a set of capsules fitted to Link's torso, hips, arms and legs, plus the ground height at his feet. The
+  stowed shield and sword are not separate colliders (use *Body padding*), and it does not know about walls. It can
+  still clip when he crawls, rolls, swims or rides.
 - It does not react to Link's sword or shield, only to his position and facing.
 
 ## Updating Dusklight

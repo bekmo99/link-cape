@@ -30,6 +30,8 @@ static ConfigVarHandle sUpVar = 0;
 static ConfigVarHandle sBackVar = 0;
 static ConfigVarHandle sHalfWidthVar = 0;
 static ConfigVarHandle sLengthVar = 0;
+static ConfigVarHandle sWrapVar = 0;
+static ConfigVarHandle sPaddingVar = 0;
 
 static ModResult registerBool(const char* name, bool def, ConfigVarHandle* out) {
     ConfigVarDesc desc = CONFIG_VAR_DESC_INIT;
@@ -67,6 +69,12 @@ static void refreshTuning() {
     }
     if (svc_config->get_int(mod_ctx, sLengthVar, &i) == MOD_OK) {
         gTuning.length = static_cast<f32>(i);
+    }
+    if (svc_config->get_int(mod_ctx, sWrapVar, &i) == MOD_OK) {
+        gTuning.wrap = static_cast<f32>(i);
+    }
+    if (svc_config->get_int(mod_ctx, sPaddingVar, &i) == MOD_OK) {
+        gTuning.padding = static_cast<f32>(i);
     }
 }
 
@@ -112,6 +120,15 @@ static ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*
         sBackVar, -20, 60, " units");
     addNumber(panel, "Half width", "Half the distance between the two attachment points.",
         sHalfWidthVar, 4, 60, " units");
+    addNumber(panel, "Shoulder wrap",
+        "How far the top corners curl forward around the shoulders. 0 = flat across the back.",
+        sWrapVar, 0, 50, " units");
+
+    svc_ui->pane_add_section(mod_ctx, panel, "Collision");
+    addNumber(panel, "Body padding",
+        "Extra clearance around Link's body. Raise it if the cape clips his shield, sword or "
+        "bulky outfits.",
+        sPaddingVar, 0, 20, " units");
 
     svc_ui->pane_add_section(mod_ctx, panel, "Troubleshooting");
     addToggle(panel, "Flip faces",
@@ -165,7 +182,9 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         registerInt("anchor_up", 10, &sUpVar) != MOD_OK ||
         registerInt("anchor_back", 14, &sBackVar) != MOD_OK ||
         registerInt("half_width", 22, &sHalfWidthVar) != MOD_OK ||
-        registerInt("length", 110, &sLengthVar) != MOD_OK)
+        registerInt("length", 110, &sLengthVar) != MOD_OK ||
+        registerInt("wrap", 14, &sWrapVar) != MOD_OK ||
+        registerInt("padding", 3, &sPaddingVar) != MOD_OK)
     {
         svc_log->error(mod_ctx, "failed to register config vars");
         return MOD_ERROR;

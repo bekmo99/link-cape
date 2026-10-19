@@ -28,6 +28,8 @@ struct Tuning {
     f32 anchorBack = 14.0f;  // anchor distance behind the spine joint
     f32 halfWidth = 22.0f;   // half the distance between the two shoulder anchors
     f32 length = 110.0f;     // cape length
+    f32 wrap = 14.0f;        // how far the top corners curl forward around the shoulders
+    f32 padding = 3.0f;      // extra clearance added to every body collider (gear, bulky outfits)
 };
 extern Tuning gTuning;
 

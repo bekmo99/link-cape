@@ -188,6 +188,62 @@ static void solveDistance(V3& a, V3& b, f32 rest, bool pinA, bool pinB) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Body colliders: capsules fitted to Link's skeleton. Joint numbers are Link's human skeleton
+// (al.bmd): 1 backbone1, 2 backbone2, 3 neck, 7/8/9 armL1/armL2/handL, 12/13/14 armR1/armR2/handR,
+// 16 waist, 18/19/20 legL1/legL2/footL, 23/24/25 legR1/legR2/footR.
+// ---------------------------------------------------------------------------------------------
+
+struct Capsule {
+    V3 a, b;
+    f32 r;
+};
+
+constexpr int kMaxCaps = 16;
+
+static V3 jointPos(daAlink_c* link, int j) {
+    MtxP m = link->mpLinkModel->getAnmMtx(j);
+    return {m[0][3], m[1][3], m[2][3]};
+}
+
+static int buildColliders(daAlink_c* link, f32 pad, Capsule* out) {
+    int n = 0;
+    auto add = [&](int ja, int jb, f32 r) {
+        out[n++] = {jointPos(link, ja), jointPos(link, jb), r + pad};
+    };
+    add(1, 3, 15.0f);                 // torso: lower spine up to the neck
+    add(16, 16, 15.0f);               // hips
+    add(7, 7, 9.0f);                  // shoulders (upper arm roots)
+    add(12, 12, 9.0f);
+    add(7, 8, 7.0f);                  // upper arms
+    add(12, 13, 7.0f);
+    add(8, 9, 6.0f);                  // forearms
+    add(13, 14, 6.0f);
+    add(18, 19, 11.0f);               // thighs
+    add(23, 24, 11.0f);
+    add(19, 20, 8.0f);                // shins
+    add(24, 25, 8.0f);
+    add(20, 21, 7.0f);                // feet
+    add(25, 26, 7.0f);
+    return n;
+}
+
+// Pushes p out of the capsule. Returns true if it moved.
+static bool collideCapsule(V3& p, const Capsule& c) {
+    const V3 ab = c.b - c.a;
+    const f32 len2 = dot(ab, ab);
+    f32 t = len2 > 1e-6f ? dot(p - c.a, ab) / len2 : 0.0f;
+    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    const V3 q = c.a + ab * t;
+    const V3 d = p - q;
+    const f32 dist = length(d);
+    if (dist >= c.r) {
+        return false;
+    }
+    p = q + (dist > 1e-4f ? d * (1.0f / dist) : V3{0.0f, 0.0f, -1.0f}) * c.r;
+    return true;
+}
+
 Cape_c::~Cape_c() {}
 
 void Cape_c::resetSim(const V3* top, const V3& back, f32 vRest) {
@@ -255,11 +311,21 @@ int Cape_c::Execute() {
     V3 top[kCols];
     for (int c = 0; c < kCols; c++) {
         const f32 t = static_cast<f32>(c) / (kCols - 1);          // 0 = left, 1 = right
-        top[c] = center + side * (gTuning.halfWidth * (1.0f - 2.0f * t));
+        const f32 u = 1.0f - 2.0f * t;                            // +1 = left end, -1 = right end
+        // The ends curl forward and down so the cape wraps over the shoulders.
+        top[c] = center + side * (gTuning.halfWidth * u) + back * (-gTuning.wrap * u * u) +
+                 V3{0.0f, -gTuning.wrap * 0.5f * u * u, 0.0f};
+    }
+    f32 topRest[kCols];
+    for (int c = 0; c < kCols; c++) {
+        const int c1 = c + 1 < kCols ? c + 1 : c - 1;
+        topRest[c] = length(top[c1] - top[c]);
     }
 
+    Capsule caps[kMaxCaps];
+    const int capCount = buildColliders(link, gTuning.padding, caps);
+
     const f32 vRest = gTuning.length / (kRows - 1);
-    const f32 hRestTop = (2.0f * gTuning.halfWidth) / (kCols - 1);
 
     // Teleports (stage change, warp, respawn): start over instead of stretching across the map.
     const V3 linkPos = {link->current.pos.x, link->current.pos.y, link->current.pos.z};
@@ -289,8 +355,8 @@ int Cape_c::Execute() {
         }
         for (int r = 0; r < kRows; r++) {
             const f32 widen = 1.0f + kWiden * static_cast<f32>(r) / (kRows - 1);
-            const f32 hRest = hRestTop * widen;
             for (int c = 0; c < kCols; c++) {
+                const f32 hRest = topRest[c] * widen;
                 V3& p = mP[r * kCols + c];
                 if (r + 1 < kRows) {
                     solveDistance(p, mP[(r + 1) * kCols + c], vRest, r == 0, false);
@@ -310,8 +376,15 @@ int Cape_c::Execute() {
                 V3& p = mP[r * kCols + c];
                 // Stay behind the plane the cape hangs from, so it doesn't pass through his back.
                 const f32 depth = dot(p - center, back);
-                if (depth < -1.0f) {
-                    p = p + back * (-1.0f - depth);
+                if (depth < -gTuning.wrap - 1.0f) {
+                    p = p + back * (-gTuning.wrap - 1.0f - depth);
+                }
+                for (int k = 0; k < capCount; k++) {
+                    if (collideCapsule(p, caps[k])) {
+                        // a little friction so the cloth rests on the body instead of bouncing
+                        V3& pv = mPrev[r * kCols + c];
+                        pv = pv + (p - pv) * 0.25f;
+                    }
                 }
                 if (p.y < groundY) {
                     p.y = groundY;

@@ -51,6 +51,8 @@ public:
     double mTickInterval = 1.0 / 30.0;
     int mDrawsThisTick = 0;
     int mDrawsLastTick = 0;
+    double mDrawEma = 1.0;       // average number of draws per tick
+    bool mInterpOn = false;      // blend between ticks (only when the game draws more than once per tick)
     bool mSnap = true;           // next tick: don't interpolate from stale data
 };
 

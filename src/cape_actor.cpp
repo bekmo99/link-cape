@@ -108,7 +108,7 @@ void Packet_c::draw() {
     // when it draws once per tick, just show the newest state.
     mDrawsThisTick++;
     f32 alpha = 1.0f;
-    if (mDrawsLastTick >= 2 && !mSnap) {
+    if (mInterpOn && !mSnap) {
         const double now = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
         double a = (now - mTickTime) / mTickInterval;
@@ -698,6 +698,30 @@ int Cape_c::Execute() {
         mP[i] = rest[i];
     }
 
+    // --- Keep the hanging cloth sane -----------------------------------------------------------
+    // A leash on how far it may stray from its resting shape (tight near the waist, loose at the
+    // hem), and a hard limit on stretching, so quick moves can't distort or stretch it.
+    for (int r = kRigid + 1; r < kRows; r++) {
+        const f32 rowT = static_cast<f32>(r - kRigid) / (kRows - 1 - kRigid);
+        const f32 maxDev = 5.0f + 22.0f * rowT * rowT;
+        for (int c = 0; c < kCols; c++) {
+            const int i = r * kCols + c;
+            V3& p = mP[i];
+            const V3 d = p - rest[i];
+            const f32 dl = length(d);
+            if (dl > maxDev) {
+                p = rest[i] + d * (maxDev / dl);
+            }
+            const V3& above = mP[i - kCols];
+            const V3 v = p - above;
+            const f32 maxLen = length(rest[i] - rest[i - kCols]) * 1.04f;
+            const f32 vl = length(v);
+            if (vl > maxLen) {
+                p = above + v * (maxLen / vl);
+            }
+        }
+    }
+
     // --- Normals and winding for drawing -----------------------------------------------------
     // Normal = dy x dx (down x right) as seen from outside; pick the sign so it faces away from
     // Link, and remember whether our triangle winding needs flipping to match.
@@ -728,6 +752,14 @@ int Cape_c::Execute() {
     }
     mPacket.mTickTime = nowSec;
     mPacket.mDrawsLastTick = mPacket.mDrawsThisTick;
+    // Decide whether to blend between ticks from a smoothed draws-per-tick count, with hysteresis.
+    // (Switching on a single tick's count made the cape flip between "ahead" and "behind" and bounce.)
+    mPacket.mDrawEma = mPacket.mDrawEma * 0.8 + static_cast<double>(mPacket.mDrawsThisTick) * 0.2;
+    if (!mPacket.mInterpOn && mPacket.mDrawEma > 1.7) {
+        mPacket.mInterpOn = true;
+    } else if (mPacket.mInterpOn && mPacket.mDrawEma < 1.25) {
+        mPacket.mInterpOn = false;
+    }
     mPacket.mDrawsThisTick = 0;
 
     for (int r = 0; r < kRows; r++) {

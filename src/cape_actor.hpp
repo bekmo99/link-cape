@@ -30,7 +30,8 @@ struct Tuning {
     f32 halfWidth = 22.0f;   // half the distance between the two shoulder anchors
     f32 length = 110.0f;     // cape length
     f32 wrap = 14.0f;        // how far the top corners curl forward around the shoulders
-    f32 padding = 1.0f;      // extra clearance added to every body collider (gear, bulky outfits)
+    f32 stiffness = 40.0f;   // 0..100, how strongly the lower cape is pulled back to its resting shape
+    f32 padding = 2.0f;      // extra clearance added to every body collider (gear, bulky outfits)
 };
 extern Tuning gTuning;
 
@@ -74,7 +75,7 @@ public:
     static Cape_c* sInstance;
 
 private:
-    void resetSim(const V3* top, const V3& back, f32 vRest);
+    void resetSim(const V3* rest);
 
     Packet_c mPacket;
     V3 mP[kCount];

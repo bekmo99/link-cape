@@ -12,7 +12,7 @@ his shoulders.
 - The mod registers a custom actor (`lnkcape`) through Dusklight's `ActorService` and spawns it as a child of
   Link whenever he exists. It deletes itself when Link goes away (stage changes, game over) and the mod respawns it.
 - Each game tick the cape reads the position of Link's upper spine joint (`backbone2`), works out two shoulder
-  attachment points behind it, and runs a small Verlet cloth simulation (13 x 16 grid) hanging from them. The cloth
+  attachment points behind it, and builds a 13 x 16 cloth grid. The part above the hips just follows his back; the part below runs a small Verlet cloth simulation that hangs from the hips and is pulled toward a shape that already wraps around his waist, skirt and boots. The cloth
   stays behind Link's back, doesn't sink below his feet, and streams out behind him when he runs.
 - It is drawn with the same GX set-up the game's own cloak actor uses (one TEV stage, scene lighting), so it picks up
   the area's lighting. It is hidden in wolf form.
@@ -49,6 +49,7 @@ his body. Open the **Mods** window, select *Link's Cape*, and adjust:
 | Distance behind back | Moves them away from his back (increase if the cape is inside him) |
 | Half width | Half the distance between the two attachment points |
 | Length | How long the cape is |
+| Stiffness | How strongly the cloth below the hips is pulled back to its body-hugging shape (higher = stiffer, less sway) |
 | Hero's Clothes only | Only show the cape while Link wears the Hero's Clothes (on by default) |
 | Shoulder wrap | How far the top corners curl forward over the shoulders (0 = flat) |
 | Body padding | Extra clearance around Link's body colliders; raise it if the cape clips his shield, sword or bulky outfits |

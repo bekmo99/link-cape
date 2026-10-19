@@ -33,6 +33,7 @@ static ConfigVarHandle sHalfWidthVar = 0;
 static ConfigVarHandle sLengthVar = 0;
 static ConfigVarHandle sWrapVar = 0;
 static ConfigVarHandle sPaddingVar = 0;
+static ConfigVarHandle sStiffVar = 0;
 
 static ModResult registerBool(const char* name, bool def, ConfigVarHandle* out) {
     ConfigVarDesc desc = CONFIG_VAR_DESC_INIT;
@@ -77,6 +78,9 @@ static void refreshTuning() {
     if (svc_config->get_int(mod_ctx, sWrapVar, &i) == MOD_OK) {
         gTuning.wrap = static_cast<f32>(i);
     }
+    if (svc_config->get_int(mod_ctx, sStiffVar, &i) == MOD_OK) {
+        gTuning.stiffness = static_cast<f32>(i);
+    }
     if (svc_config->get_int(mod_ctx, sPaddingVar, &i) == MOD_OK) {
         gTuning.padding = static_cast<f32>(i);
     }
@@ -116,6 +120,9 @@ static ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*
         "armor or Magic Armor).",
         sHeroVar);
     addNumber(panel, "Length", "How long the cape is.", sLengthVar, 20, 250, " units");
+    addNumber(panel, "Stiffness",
+        "How stiff the cloth below the hips is. Higher hugs his body more and sways less.",
+        sStiffVar, 0, 100, "");
 
     svc_ui->pane_add_section(mod_ctx, panel, "Fit");
     svc_ui->pane_add_text(mod_ctx, panel,
@@ -193,7 +200,8 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         registerInt("half_width", 22, &sHalfWidthVar) != MOD_OK ||
         registerInt("length", 110, &sLengthVar) != MOD_OK ||
         registerInt("wrap", 14, &sWrapVar) != MOD_OK ||
-        registerInt("padding", 1, &sPaddingVar) != MOD_OK)
+        registerInt("stiffness", 40, &sStiffVar) != MOD_OK ||
+        registerInt("padding", 2, &sPaddingVar) != MOD_OK)
     {
         svc_log->error(mod_ctx, "failed to register config vars");
         return MOD_ERROR;

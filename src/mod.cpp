@@ -27,14 +27,8 @@ using lnkcape::gTuning;
 static ConfigVarHandle sShowVar = 0;
 static ConfigVarHandle sFlipVar = 0;
 static ConfigVarHandle sHeroVar = 0;
-static ConfigVarHandle sUpVar = 0;
-static ConfigVarHandle sBackVar = 0;
-static ConfigVarHandle sHalfWidthVar = 0;
 static ConfigVarHandle sLengthVar = 0;
-static ConfigVarHandle sWrapVar = 0;
-static ConfigVarHandle sPaddingVar = 0;
 static ConfigVarHandle sStiffVar = 0;
-static ConfigVarHandle sClearVar = 0;
 
 static ModResult registerBool(const char* name, bool def, ConfigVarHandle* out) {
     ConfigVarDesc desc = CONFIG_VAR_DESC_INIT;
@@ -64,29 +58,11 @@ static void refreshTuning() {
     if (svc_config->get_bool(mod_ctx, sFlipVar, &b) == MOD_OK) {
         gTuning.flipFaces = b;
     }
-    if (svc_config->get_int(mod_ctx, sUpVar, &i) == MOD_OK) {
-        gTuning.anchorUp = static_cast<f32>(i);
-    }
-    if (svc_config->get_int(mod_ctx, sBackVar, &i) == MOD_OK) {
-        gTuning.anchorBack = static_cast<f32>(i);
-    }
-    if (svc_config->get_int(mod_ctx, sHalfWidthVar, &i) == MOD_OK) {
-        gTuning.halfWidth = static_cast<f32>(i);
-    }
     if (svc_config->get_int(mod_ctx, sLengthVar, &i) == MOD_OK) {
         gTuning.length = static_cast<f32>(i);
     }
-    if (svc_config->get_int(mod_ctx, sWrapVar, &i) == MOD_OK) {
-        gTuning.wrap = static_cast<f32>(i);
-    }
-    if (svc_config->get_int(mod_ctx, sClearVar, &i) == MOD_OK) {
-        gTuning.waistClear = static_cast<f32>(i);
-    }
     if (svc_config->get_int(mod_ctx, sStiffVar, &i) == MOD_OK) {
         gTuning.stiffness = static_cast<f32>(i);
-    }
-    if (svc_config->get_int(mod_ctx, sPaddingVar, &i) == MOD_OK) {
-        gTuning.padding = static_cast<f32>(i);
     }
 }
 
@@ -123,35 +99,11 @@ static ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*
         "Only draw the cape while Link is wearing the Hero's Clothes (not the Ordon clothes, Zora "
         "armor or Magic Armor).",
         sHeroVar);
-    addNumber(panel, "Length", "How long the cape is.", sLengthVar, 20, 250, " units");
+    addNumber(panel, "Length", "How long the cape is, from the collar to the hem.", sLengthVar, 40,
+        140, " units");
     addNumber(panel, "Stiffness",
-        "How stiff the cloth below the hips is. Higher hugs his body more and sways less.",
+        "How stiff the cloth below the waist is. Higher hugs his body more and sways less.",
         sStiffVar, 0, 100, "");
-
-    svc_ui->pane_add_section(mod_ctx, panel, "Fit");
-    svc_ui->pane_add_text(mod_ctx, panel,
-        "Where the cape's two top corners sit, measured from Link's upper spine. Adjust these "
-        "until the cape hangs from his shoulders.",
-        nullptr);
-    addNumber(panel, "Shoulder height", "Raises (+) or lowers (-) the attachment points.",
-        sUpVar, -60, 80, " units");
-    addNumber(panel, "Distance behind back", "Moves the attachment points away from his back.",
-        sBackVar, -20, 60, " units");
-    addNumber(panel, "Half width", "Half the distance between the two attachment points.",
-        sHalfWidthVar, 4, 60, " units");
-    addNumber(panel, "Shoulder wrap",
-        "How far the top corners curl forward around the shoulders. 0 = flat across the back.",
-        sWrapVar, 0, 50, " units");
-
-    svc_ui->pane_add_section(mod_ctx, panel, "Collision");
-    addNumber(panel, "Waist clearance",
-        "Extra room around his hips, belt and tunic flap. Raise it if the tunic pokes through the "
-        "lower cape.",
-        sClearVar, 0, 30, " units");
-    addNumber(panel, "Body padding",
-        "Extra clearance around Link's body. Raise it if the cape clips his shield, sword or "
-        "bulky outfits.",
-        sPaddingVar, 0, 20, " units");
 
     svc_ui->pane_add_section(mod_ctx, panel, "Troubleshooting");
     addToggle(panel, "Flip faces",
@@ -203,14 +155,8 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     if (registerBool("show_cape", true, &sShowVar) != MOD_OK ||
         registerBool("flip_faces", false, &sFlipVar) != MOD_OK ||
         registerBool("hero_only", true, &sHeroVar) != MOD_OK ||
-        registerInt("anchor_up", 10, &sUpVar) != MOD_OK ||
-        registerInt("anchor_back", 14, &sBackVar) != MOD_OK ||
-        registerInt("half_width", 22, &sHalfWidthVar) != MOD_OK ||
-        registerInt("length", 110, &sLengthVar) != MOD_OK ||
-        registerInt("wrap", 14, &sWrapVar) != MOD_OK ||
-        registerInt("stiffness", 40, &sStiffVar) != MOD_OK ||
-        registerInt("waist_clear", 6, &sClearVar) != MOD_OK ||
-        registerInt("padding", 2, &sPaddingVar) != MOD_OK)
+        registerInt("length", 100, &sLengthVar) != MOD_OK ||
+        registerInt("stiffness", 40, &sStiffVar) != MOD_OK)
     {
         svc_log->error(mod_ctx, "failed to register config vars");
         return MOD_ERROR;

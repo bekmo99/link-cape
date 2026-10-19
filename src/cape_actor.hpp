@@ -25,14 +25,8 @@ struct Tuning {
     bool enabled = true;
     bool heroOnly = true;    // only show the cape while Link wears the Hero's Clothes
     bool flipFaces = false;  // swap which side of the cloth counts as "outside" (see README)
-    f32 anchorUp = 10.0f;    // anchor height above Link's spine joint (backbone2)
-    f32 anchorBack = 14.0f;  // anchor distance behind the spine joint
-    f32 halfWidth = 22.0f;   // half the distance between the two shoulder anchors
-    f32 length = 110.0f;     // cape length
-    f32 wrap = 14.0f;        // how far the top corners curl forward around the shoulders
-    f32 stiffness = 40.0f;   // 0..100, how strongly the lower cape is pulled back to its resting shape
-    f32 waistClear = 6.0f;   // extra clearance around the hips, belt and tunic flap
-    f32 padding = 2.0f;      // extra clearance added to every body collider (gear, bulky outfits)
+    f32 length = 100.0f;     // cape length, collar to hem
+    f32 stiffness = 40.0f;   // 0..100, how strongly the hanging cape is pulled back to its resting shape
 };
 extern Tuning gTuning;
 
@@ -84,11 +78,6 @@ private:
     V3 mLastLinkPos;
     bool mSimInit;
     f32 mStream = 0.0f;  // smoothed run-speed push
-    // The rigid upper part, stored relative to Link's spine and waist joints (see Execute)
-    bool mCalib = false;
-    f32 mCalibKey[6] = {0, 0, 0, 0, 0, 0};
-    V3 mLocS[(5) * kCols];
-    V3 mLocW[(5) * kCols];
 };
 
 }  // namespace lnkcape

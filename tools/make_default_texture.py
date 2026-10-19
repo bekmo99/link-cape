@@ -25,15 +25,38 @@ def lerp(a, b, t):
     return a + (b - a) * t
 
 
+def in_triangle(px, py, a, b, c):
+    def sign(p1, p2, p3):
+        return (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p3[1])
+    d1 = sign((px, py), a, b)
+    d2 = sign((px, py), b, c)
+    d3 = sign((px, py), c, a)
+    neg = d1 < 0 or d2 < 0 or d3 < 0
+    pos = d1 > 0 or d2 > 0 or d3 > 0
+    return not (neg and pos)
+
+
+def in_triforce(x, y):
+    """A small gold Triforce, low on the cape (it sits over the tunic flap when worn)."""
+    cx, top_y, s = W / 2, 150, 17  # centre x, apex y, half-width of one triangle
+    h = s * 1.7
+    tris = [
+        ((cx, top_y), (cx - s, top_y + h), (cx + s, top_y + h)),
+        ((cx - s, top_y + h), (cx - 2 * s, top_y + 2 * h), (cx, top_y + 2 * h)),
+        ((cx + s, top_y + h), (cx, top_y + 2 * h), (cx + 2 * s, top_y + 2 * h)),
+    ]
+    return any(in_triangle(x, y, *t) for t in tris)
+
+
 def main():
     rng = random.Random(7)
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     px = img.load()
 
-    # base cloth: deep green (matches the tunic) fading a little darker toward the hem
-    top = (46, 98, 52)
-    bottom = (22, 58, 34)
-    trim = (214, 178, 84)
+    # base cloth: royal blue (matches the Hylian armor's tunic) fading a little darker toward the hem
+    top = (34, 58, 128)
+    bottom = (18, 32, 84)
+    trim = (222, 184, 84)
 
     # vertical folds: a few sine bands of different frequency
     folds = [(3.0, 0.5), (5.5, 1.7), (8.0, 0.2)]
@@ -58,8 +81,11 @@ def main():
             edge = min(x, W - 1 - x)
             hem_dist = (H - 1 - 4 - hem[x]) - y
             is_trim = edge < 5 or y < 6 or (hem_dist < 7 and hem_dist >= 0)
-            if is_trim:
-                k = 0.85 + 0.15 * math.sin((x + y) * 0.5)
+            # thin inner gold line, like the stitching on the tunic
+            inner = (edge in (9, 10) and y > 9 and hem_dist > 10) or (y in (9, 10) and 9 <= x <= W - 10) \
+                or (hem_dist in (10, 11) and 9 <= x <= W - 10)
+            if is_trim or inner or in_triforce(x, y):
+                k = 0.94 + 0.06 * math.sin((x + y) * 0.5)
                 col = [trim[i] * k for i in range(3)]
             else:
                 col = base

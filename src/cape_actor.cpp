@@ -216,6 +216,7 @@ static void solveDistance(V3& a, V3& b, f32 rest, bool pinA, bool pinB) {
 struct Capsule {
     V3 a, b;
     f32 r;
+    bool core;  // torso / hips / skirt: the shapes the rigid upper part of the cape rests on
 };
 
 constexpr int kMaxCaps = 24;
@@ -225,20 +226,22 @@ static V3 jointPos(daAlink_c* link, int j) {
     return {m[0][3], m[1][3], m[2][3]};
 }
 
-static int buildColliders(daAlink_c* link, f32 pad, Capsule* out) {
+static int buildColliders(daAlink_c* link, f32 pad, const V3& back, Capsule* out) {
     int n = 0;
     const int jointCount = link->mpLinkModel->getModelData()->getJointNum();
-    auto add = [&](int ja, int jb, f32 r) {
+    auto add = [&](int ja, int jb, f32 r, bool core = false, f32 shiftBack = 0.0f) {
         if (ja >= jointCount || jb >= jointCount || n >= kMaxCaps) {
             return;  // this skeleton doesn't have that joint
         }
-        out[n++] = {jointPos(link, ja), jointPos(link, jb), r + pad};
+        const V3 sh = back * shiftBack;
+        out[n++] = {jointPos(link, ja) + sh, jointPos(link, jb) + sh, r + pad, core};
     };
-    add(1, 3, 12.0f);                 // torso: lower spine up to the neck
-    add(16, 16, 15.0f);               // hips / belt
-    add(17, 22, 11.0f);               // pelvis, across both thigh roots
-    add(31, 32, 8.0f);                // rear skirt flaps (they flare out behind the hips)
-    add(33, 34, 8.0f);
+    add(1, 3, 12.0f, true);           // torso: lower spine up to the neck
+    add(16, 16, 17.0f, true);         // hips / belt
+    add(17, 22, 12.0f, true);         // pelvis, across both thigh roots
+    add(31, 32, 10.0f, true, 4.0f);   // rear skirt flaps (they hang out behind the hips)
+    add(33, 34, 10.0f, true, 4.0f);
+    add(16, 16, 11.0f, true, 9.0f);   // the tunic's back flap, just behind the belt
     add(7, 7, 9.0f);                  // shoulders (upper arm roots)
     add(12, 12, 9.0f);
     add(7, 8, 7.0f);                  // upper arms
@@ -415,7 +418,7 @@ int Cape_c::Execute() {
     const V3 waistPos = jointPos(link, 16);
 
     Capsule caps[kMaxCaps];
-    const int capCount = buildColliders(link, gTuning.padding, caps);
+    const int capCount = buildColliders(link, gTuning.padding, back, caps);
 
     Box allBoxes[kMaxBoxes];
     int allCount = 0;
@@ -443,14 +446,16 @@ int Cape_c::Execute() {
     }
 
     // Pushes a point out of Link's body (and in under his back gear).
-    auto resolveBody = [&](V3& p, int passes) {
+    auto resolveBody = [&](V3& p, int passes, bool coreOnly) {
         V3 n;
         for (int pass = 0; pass < passes; pass++) {
             for (int k = 0; k < boxCount; k++) {
                 collideBoxInward(p, boxes[k], back, n);
             }
             for (int k = 0; k < capCount; k++) {
-                collideCapsule(p, caps[k], n);
+                if (!coreOnly || caps[k].core) {
+                    collideCapsule(p, caps[k], n);
+                }
             }
         }
     };
@@ -460,8 +465,43 @@ int Cape_c::Execute() {
     // cloth that hangs from the hip row. For every row we also compute a "rest" shape that already
     // wraps around his body; the cloth is pulled toward it, so it stays close to him, and the
     // constraint lengths come from it so the bumps of his waist and boots don't stretch it.
-    const V3 center = spinePos + back * gTuning.anchorBack + up * gTuning.anchorUp;
-    const V3 hipCenter = waistPos + back * (gTuning.anchorBack * 0.85f);
+    // The anchors follow the spine's and waist's real orientation (so they lean with him) instead
+    // of just his yaw. The joint axes aren't documented, so pick them by which one points where.
+    V3 sBack = back, sUp = up, sSide = side;
+    V3 wBack = back;
+    auto jointFrame = [&](int j, V3& fb, V3& fu, V3& fs) {
+        MtxP m = link->mpLinkModel->getAnmMtx(j);
+        V3 col[3];
+        for (int k = 0; k < 3; k++) {
+            col[k] = normalized(V3{m[0][k], m[1][k], m[2][k]}, V3{0.0f, 1.0f, 0.0f});
+        }
+        int ib = 0;
+        for (int k = 1; k < 3; k++) {
+            if (std::fabs(dot(col[k], back)) > std::fabs(dot(col[ib], back))) {
+                ib = k;
+            }
+        }
+        int iu = ib == 0 ? 1 : 0;
+        for (int k = 0; k < 3; k++) {
+            if (k != ib && std::fabs(dot(col[k], up)) > std::fabs(dot(col[iu], up))) {
+                iu = k;
+            }
+        }
+        if (std::fabs(dot(col[ib], back)) < 0.6f || std::fabs(dot(col[iu], up)) < 0.5f) {
+            return;  // ambiguous pose (rolling, crawling...): keep the yaw frame
+        }
+        V3 b = dot(col[ib], back) < 0.0f ? col[ib] * -1.0f : col[ib];
+        V3 u = dot(col[iu], up) < 0.0f ? col[iu] * -1.0f : col[iu];
+        fb = b;
+        fu = u;
+        fs = normalized(cross(b, u), side);
+    };
+    jointFrame(2, sBack, sUp, sSide);
+    V3 wUp = up, wSide = side;
+    jointFrame(16, wBack, wUp, wSide);
+
+    const V3 center = spinePos + sBack * gTuning.anchorBack + sUp * gTuning.anchorUp;
+    const V3 hipCenter = waistPos + wBack * (gTuning.anchorBack * 0.85f);
 
     V3 top[kCols];
     V3 hip[kCols];
@@ -469,10 +509,10 @@ int Cape_c::Execute() {
         const f32 t = static_cast<f32>(c) / (kCols - 1);          // 0 = left, 1 = right
         const f32 u = 1.0f - 2.0f * t;                            // +1 = left end, -1 = right end
         // The ends curl forward and down so the cape wraps over the shoulders.
-        top[c] = center + side * (gTuning.halfWidth * u) + back * (-gTuning.wrap * u * u) +
-                 up * (-gTuning.wrap * 0.5f * u * u);
-        hip[c] = hipCenter + side * (gTuning.halfWidth * u * (1.0f + kWiden * 0.25f)) +
-                 back * (-gTuning.wrap * 0.35f * u * u);
+        top[c] = center + sSide * (gTuning.halfWidth * u) + sBack * (-gTuning.wrap * u * u) +
+                 sUp * (-gTuning.wrap * 0.5f * u * u);
+        hip[c] = hipCenter + wSide * (gTuning.halfWidth * u * (1.0f + kWiden * 0.25f)) +
+                 wBack * (-gTuning.wrap * 0.35f * u * u);
     }
 
     V3 rest[kCount];
@@ -483,7 +523,7 @@ int Cape_c::Execute() {
         const f32 t = static_cast<f32>(r) / kRigid;
         for (int c = 0; c < kCols; c++) {
             V3 p = top[c] + (hip[c] - top[c]) * t;
-            resolveBody(p, 2);
+            resolveBody(p, 2, true);   // the rigid part ignores swinging arms and legs
             rest[r * kCols + c] = p;
         }
     }
@@ -503,7 +543,7 @@ int Cape_c::Execute() {
             const V3 mid = rest[kRigid * kCols + kCols / 2];
             // hang straight down from the hip row, flaring a little toward the hem
             V3 p = h + (h - mid) * (widen - 1.0f) + up * (-vRestLow * k) + back * (k * 0.4f);
-            resolveBody(p, 3);
+            resolveBody(p, 3, false);
             if (p.y < groundY) {
                 p.y = groundY;
             }

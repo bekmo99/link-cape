@@ -83,7 +83,21 @@ jobs:
           cmake -B build "${args[@]}"
 
       - name: Build
-        run: cmake --build build --parallel
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build --parallel 2>&1 | tee build.log
+
+      - name: Report build errors
+        if: failure()
+        shell: bash
+        run: |
+          # Surface compiler/linker errors as annotations so they show up on the run summary page.
+          grep -E 'error|fatal|LNK[0-9]+|undefined reference|unresolved' build.log | head -30 | while IFS= read -r line; do
+            line="${line//$'\r'/}"
+            line="${line//'%'/%25}"
+            echo "::error::${line:0:1500}"
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

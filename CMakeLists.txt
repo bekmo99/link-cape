@@ -28,3 +28,10 @@ add_mod(link_cape
         OVERLAY_DIR overlay    # game file overlays; remove if unused
         TEXTURES_DIR textures  # texture replacements; remove if unused
 )
+
+# MSVC only reports the real C++ version in __cplusplus with /Zc:__cplusplus. Dusklight's game headers
+# (dolphin/types.h) redefine `nullptr` as NULL when __cplusplus < 201103L, which breaks the MSVC
+# standard library. The game itself builds with this flag; the mod SDK doesn't pass it for us.
+if (MSVC)
+    target_compile_options(link_cape PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>")
+endif ()

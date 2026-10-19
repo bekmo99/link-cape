@@ -30,7 +30,7 @@ struct Tuning {
     f32 halfWidth = 22.0f;   // half the distance between the two shoulder anchors
     f32 length = 110.0f;     // cape length
     f32 wrap = 14.0f;        // how far the top corners curl forward around the shoulders
-    f32 padding = 3.0f;      // extra clearance added to every body collider (gear, bulky outfits)
+    f32 padding = 1.0f;      // extra clearance added to every body collider (gear, bulky outfits)
 };
 extern Tuning gTuning;
 
@@ -44,6 +44,18 @@ public:
     bool mFlip = false;
     V3 mPos[kCount];
     V3 mNrm[kCount];
+
+    // Frame interpolation: the sim ticks at 30 Hz but the game may draw more often. We keep the
+    // previous tick's result too and blend between the two by wall-clock time (see draw()).
+    V3 mPosPrev[kCount];
+    V3 mNrmPrev[kCount];
+    V3 mDrawPos[kCount];
+    V3 mDrawNrm[kCount];
+    double mTickTime = 0.0;      // seconds, when the latest tick finished
+    double mTickInterval = 1.0 / 30.0;
+    int mDrawsThisTick = 0;
+    int mDrawsLastTick = 0;
+    bool mSnap = true;           // next tick: don't interpolate from stale data
 };
 
 class Cape_c : public fopAc_ac_c {

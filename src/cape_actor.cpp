@@ -8,6 +8,7 @@
 #include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -84,8 +85,8 @@ static void submitCloth(const Packet_c& pk, bool inside) {
             const int* idx = pk.mFlip ? flipped : order;
             for (int k = 0; k < 6; k++) {
                 const int i = idx[k];
-                const V3& p = pk.mPos[i];
-                const V3& n = pk.mNrm[i];
+                const V3& p = pk.mDrawPos[i];
+                const V3& n = pk.mDrawNrm[i];
                 GXPosition3f32(p.x, p.y, p.z);
                 GXNormal3f32(n.x * ns, n.y * ns, n.z * ns);
                 GXTexCoord2f32(
@@ -101,6 +102,22 @@ void Packet_c::draw() {
         return;
     }
     initTexture();
+
+    // Interpolate between the last two ticks when the game draws more often than it simulates;
+    // when it draws once per tick, just show the newest state.
+    mDrawsThisTick++;
+    f32 alpha = 1.0f;
+    if (mDrawsLastTick >= 2 && !mSnap) {
+        const double now = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        double a = (now - mTickTime) / mTickInterval;
+        a = a < 0.0 ? 0.0 : (a > 1.0 ? 1.0 : a);
+        alpha = static_cast<f32>(a);
+    }
+    for (int i = 0; i < kCount; i++) {
+        mDrawPos[i] = mPosPrev[i] + (mPos[i] - mPosPrev[i]) * alpha;
+        mDrawNrm[i] = normalized(mNrmPrev[i] + (mNrm[i] - mNrmPrev[i]) * alpha, mNrm[i]);
+    }
 
     j3dSys.reinitGX();
     GXSetNumIndStages(0);
@@ -166,7 +183,7 @@ constexpr int kIterations = 10;
 constexpr f32 kMaxSpeed = 30.0f;  // per-tick velocity clamp, keeps contact from launching the cloth
 constexpr f32 kDrag = 0.06f;      // fraction of velocity lost per tick
 constexpr f32 kGravity = 1.4f;    // units per tick^2
-constexpr f32 kRunStream = 0.025f;  // extra backward push per unit of Link's forward speed
+constexpr f32 kRunStream = 0.012f;  // extra backward push per unit of Link's forward speed
 constexpr f32 kWiden = 0.35f;     // how much wider the hem is than the shoulders
 
 static void solveDistance(V3& a, V3& b, f32 rest, bool pinA, bool pinB) {
@@ -213,7 +230,8 @@ static int buildColliders(daAlink_c* link, f32 pad, Capsule* out) {
         out[n++] = {jointPos(link, ja), jointPos(link, jb), r + pad};
     };
     add(1, 3, 12.0f);                 // torso: lower spine up to the neck
-    add(16, 16, 15.0f);               // hips
+    add(16, 16, 14.0f);               // hips
+    add(17, 22, 10.0f);               // pelvis, across both thigh roots
     add(7, 7, 9.0f);                  // shoulders (upper arm roots)
     add(12, 12, 9.0f);
     add(7, 8, 7.0f);                  // upper arms
@@ -291,45 +309,39 @@ static void addModelBoxes(J3DModel* model, f32 pad, Box* out, int& n) {
     }
 }
 
-static bool collideBox(V3& p, const Box& b, V3& nOut) {
+// Gear on Link's back goes OVER the cape: a cloth point inside the box is pushed out through the
+// face that looks toward Link's body, so the cloth ends up between his back and the gear.
+static bool collideBoxInward(V3& p, const Box& b, const V3& back, V3& nOut) {
     const V3 rel = p - b.origin;
     f32 l[3];
-    f32 lo[3];
-    f32 hi[3];
-    f32 rad[3];
     for (int k = 0; k < 3; k++) {
         const f32 s = b.scale[k] > 1e-4f ? b.scale[k] : 1.0f;
         l[k] = dot(rel, b.axis[k]) / s;
-        rad[k] = b.r / s;
-        lo[k] = (k == 0 ? b.mn.x : (k == 1 ? b.mn.y : b.mn.z)) - rad[k];
-        hi[k] = (k == 0 ? b.mx.x : (k == 1 ? b.mx.y : b.mx.z)) + rad[k];
     }
-    if (l[0] <= lo[0] || l[0] >= hi[0] || l[1] <= lo[1] || l[1] >= hi[1] || l[2] <= lo[2] ||
-        l[2] >= hi[2])
-    {
-        return false;
-    }
-    // Inside the padded box: leave through the nearest face.
-    int axisK = 0;
-    f32 best = 1e30f;
-    f32 dir = 1.0f;
+    const f32 lo[3] = {b.mn.x, b.mn.y, b.mn.z};
+    const f32 hi[3] = {b.mx.x, b.mx.y, b.mx.z};
     for (int k = 0; k < 3; k++) {
-        const f32 s = b.scale[k] > 1e-4f ? b.scale[k] : 1.0f;
-        const f32 dLo = (l[k] - lo[k]) * s;
-        const f32 dHi = (hi[k] - l[k]) * s;
-        if (dLo < best) {
-            best = dLo;
-            axisK = k;
-            dir = -1.0f;
-        }
-        if (dHi < best) {
-            best = dHi;
-            axisK = k;
-            dir = 1.0f;
+        if (l[k] <= lo[k] || l[k] >= hi[k]) {
+            return false;
         }
     }
-    nOut = b.axis[axisK] * dir;
-    p = p + nOut * best;
+    int bestK = 0;
+    f32 bestDir = 1.0f;
+    f32 bestDot = 1e30f;
+    for (int k = 0; k < 3; k++) {
+        for (int sgn = -1; sgn <= 1; sgn += 2) {
+            const f32 d = dot(b.axis[k] * static_cast<f32>(sgn), back);
+            if (d < bestDot) {
+                bestDot = d;
+                bestK = k;
+                bestDir = static_cast<f32>(sgn);
+            }
+        }
+    }
+    const f32 s = b.scale[bestK] > 1e-4f ? b.scale[bestK] : 1.0f;
+    const f32 dist = (bestDir > 0.0f ? hi[bestK] - l[bestK] : l[bestK] - lo[bestK]) * s;
+    nOut = b.axis[bestK] * bestDir;
+    p = p + nOut * (dist + 0.5f);
     return true;
 }
 
@@ -416,14 +428,29 @@ int Cape_c::Execute() {
     Capsule caps[kMaxCaps];
     const int capCount = buildColliders(link, gTuning.padding, caps);
 
-    Box boxes[kMaxBoxes];
-    int boxCount = 0;
+    Box allBoxes[kMaxBoxes];
+    int allCount = 0;
     if (link->checkShieldGet()) {
-        addModelBoxes(link->mShieldModel, gTuning.padding, boxes, boxCount);
+        addModelBoxes(link->mShieldModel, 0.0f, allBoxes, allCount);
     }
     if (link->checkSwordGet()) {
-        addModelBoxes(link->mSheathModel, gTuning.padding, boxes, boxCount);
-        addModelBoxes(link->mSwordModel, gTuning.padding, boxes, boxCount);
+        addModelBoxes(link->mSheathModel, 0.0f, allBoxes, allCount);
+        addModelBoxes(link->mSwordModel, 0.0f, allBoxes, allCount);
+    }
+    // Only gear that is actually stowed on his back goes over the cape.
+    Box boxes[kMaxBoxes];
+    int boxCount = 0;
+    for (int i = 0; i < allCount; i++) {
+        const Box& b = allBoxes[i];
+        V3 mid = b.origin;
+        for (int k = 0; k < 3; k++) {
+            const f32 m = ((k == 0 ? b.mn.x + b.mx.x : (k == 1 ? b.mn.y + b.mx.y : b.mn.z + b.mx.z)) * 0.5f);
+            mid = mid + b.axis[k] * (m * b.scale[k]);
+        }
+        const V3 off = mid - spinePos;
+        if (dot(off, back) > 2.0f && length(off) < 60.0f) {
+            boxes[boxCount++] = b;
+        }
     }
 
     const f32 vRest = gTuning.length / (kRows - 1);
@@ -432,6 +459,7 @@ int Cape_c::Execute() {
     const V3 linkPos = {link->current.pos.x, link->current.pos.y, link->current.pos.z};
     if (!mSimInit || length(linkPos - mLastLinkPos) > 400.0f) {
         resetSim(top, back, vRest);
+        mPacket.mSnap = true;
     }
     mLastLinkPos = linkPos;
 
@@ -494,14 +522,14 @@ int Cape_c::Execute() {
                 // Rows 0-1 hang from the (pinned) anchors, which may sit inside the padded body
                 // shapes; colliding them would only fight the pins and make the top shake.
                 if (r >= 2) {
-                    for (int k = 0; k < capCount; k++) {
-                        if (collideCapsule(p, caps[k], n)) {
+                    for (int k = 0; k < boxCount; k++) {
+                        if (collideBoxInward(p, boxes[k], back, n)) {
                             hit = true;
                             hitN = hitN + n;
                         }
                     }
-                    for (int k = 0; k < boxCount; k++) {
-                        if (collideBox(p, boxes[k], n)) {
+                    for (int k = 0; k < capCount; k++) {
+                        if (collideCapsule(p, caps[k], n)) {
                             hit = true;
                             hitN = hitN + n;
                         }
@@ -546,12 +574,31 @@ int Cape_c::Execute() {
     const f32 sign = 1.0f;
     mPacket.mFlip = gTuning.flipFaces;
 
+    const double nowSec = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (!mPacket.mSnap) {
+        std::memcpy(mPacket.mPosPrev, mPacket.mPos, sizeof(mPacket.mPos));
+        std::memcpy(mPacket.mNrmPrev, mPacket.mNrm, sizeof(mPacket.mNrm));
+        const double dt = nowSec - mPacket.mTickTime;
+        if (dt > 0.005 && dt < 0.2) {
+            mPacket.mTickInterval = mPacket.mTickInterval * 0.7 + dt * 0.3;
+        }
+    }
+    mPacket.mTickTime = nowSec;
+    mPacket.mDrawsLastTick = mPacket.mDrawsThisTick;
+    mPacket.mDrawsThisTick = 0;
+
     for (int r = 0; r < kRows; r++) {
         for (int c = 0; c < kCols; c++) {
             const int i = r * kCols + c;
             mPacket.mPos[i] = mP[i];
             mPacket.mNrm[i] = normalized(gridNormal(r, c) * sign, back);
         }
+    }
+    if (mPacket.mSnap) {
+        std::memcpy(mPacket.mPosPrev, mPacket.mPos, sizeof(mPacket.mPos));
+        std::memcpy(mPacket.mNrmPrev, mPacket.mNrm, sizeof(mPacket.mNrm));
+        mPacket.mSnap = false;
     }
     return 1;
 }

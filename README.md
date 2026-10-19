@@ -83,7 +83,7 @@ how wide the hem flares, ...) are the place.
 - The cape updates once per game tick and is not interpolated, so at high frame rates its motion can look a little
   steppier than Link's. Dusklight v2.0.2 has no mod-side interpolation service.
 - Collision is a set of capsules fitted to Link's torso, hips, arms and legs, plus the ground height at his feet. The
-  sword, sheath and shield on his back are boxes taken from those models' own bounds, and it does not know about walls. It can
+  sword, sheath and shield on his back are boxes taken from those models' own bounds, and the cape is pushed in under them, and it does not know about walls. It can
   still clip when he crawls, rolls, swims or rides.
 - It does not react to Link's sword or shield, only to his position and facing.
 

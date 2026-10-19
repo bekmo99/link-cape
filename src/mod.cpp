@@ -193,7 +193,7 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         registerInt("half_width", 22, &sHalfWidthVar) != MOD_OK ||
         registerInt("length", 110, &sLengthVar) != MOD_OK ||
         registerInt("wrap", 14, &sWrapVar) != MOD_OK ||
-        registerInt("padding", 3, &sPaddingVar) != MOD_OK)
+        registerInt("padding", 1, &sPaddingVar) != MOD_OK)
     {
         svc_log->error(mod_ctx, "failed to register config vars");
         return MOD_ERROR;

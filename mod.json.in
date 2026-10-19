@@ -1,7 +1,7 @@
 {
-  "id": "com.example.my_mod",
-  "name": "My Mod",
+  "id": "com.bekmo99.link_cape",
+  "name": "Link's Cape",
   "version": "@PROJECT_VERSION@",
-  "author": "You",
-  "description": "An example Dusklight mod"
+  "author": "bekmo99",
+  "description": "Gives Link a physics-driven cape that hangs from his shoulders."
 }

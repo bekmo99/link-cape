@@ -10,7 +10,7 @@ his shoulders.
 ## How it works
 
 This cape is made for one model: the Hylian-armor Link model (blue tunic with gold trim, worn as the
-Hero's Clothes). It does not draw on any other model or outfit.
+Hero's Clothes). It does not draw on any other model or outfit. The top of the cape sits at the shoulders, under the collar.
 
 - The mod registers a custom actor (`lnkcape`) through Dusklight's `ActorService` and spawns it as a child of
   Link whenever he exists. It deletes itself when Link goes away (stage changes, game over) and the mod respawns it.

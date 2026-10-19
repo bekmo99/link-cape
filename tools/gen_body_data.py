@@ -132,8 +132,8 @@ print('spheres',len(sph))
 
 # --- rigid cape rows (bind space)
 kCols=13; kRigid=4
-Y_TOP=118.0; Y_HIP=103.0
-HALFW=20.5
+Y_TOP=131.5; Y_HIP=103.0
+HALFW=18.0
 def hw(y): return HALFW
 rigid=[]  # per row, per col: (lChest,lWaist)
 pts=[]
@@ -149,7 +149,7 @@ for r in range(kRigid+1):
                 if z is not None: zs.append(z)
         z=min(zs) if zs else -10.0
         z=max(-13.0,min(-3.0,z))
-        p=np.array([x,y,z-1.0])
+        p=np.array([x,y,z-0.8])
         pts.append(p)
         rigid.append((to_local(2,p),to_local(16,p)))
 pts=np.array(pts)

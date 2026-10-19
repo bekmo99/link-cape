@@ -155,7 +155,7 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
     if (registerBool("show_cape", true, &sShowVar) != MOD_OK ||
         registerBool("flip_faces", false, &sFlipVar) != MOD_OK ||
         registerBool("hero_only", true, &sHeroVar) != MOD_OK ||
-        registerInt("length", 100, &sLengthVar) != MOD_OK ||
+        registerInt("length", 110, &sLengthVar) != MOD_OK ||
         registerInt("stiffness", 40, &sStiffVar) != MOD_OK)
     {
         svc_log->error(mod_ctx, "failed to register config vars");

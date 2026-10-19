@@ -196,7 +196,7 @@ static_assert(kRigid + 1 == 5, "body_data.hpp was generated for 5 rigid rows");
 constexpr f32 kMaxSpeed = 30.0f;    // per-tick velocity clamp, keeps contact from launching the cloth
 constexpr f32 kDrag = 0.12f;        // fraction of velocity lost per tick
 constexpr f32 kGravity = 0.9f;      // units per tick^2
-constexpr f32 kRunStream = 0.008f;  // extra backward push per unit of Link's forward speed
+constexpr f32 kRunStream = 0.012f;  // extra backward push per unit of Link's forward speed
 constexpr f32 kWiden = 0.20f;       // how much wider the hem is than the hips
 constexpr f32 kSkin = 1.0f;         // the cloth rides this far outside the body
 
@@ -264,16 +264,20 @@ struct Sphere {
     f32 r;
 };
 
-// Pushes p out of the sphere. Returns true if it moved, with the outward normal in n.
-static bool collideSphere(V3& p, const Sphere& s, V3& n) {
+// Pushes p out of the sphere by moving it BACKWARD (along `back`, a unit vector) until it clears it,
+// rather than out through the nearest surface: the cape always hangs behind Link, and a point that
+// starts inside his thick tunic flap would otherwise be shoved the short way, into his body.
+// Returns true if it moved.
+static bool collideSphere(V3& p, const Sphere& s, const V3& back) {
     const V3 d = p - s.c;
     const f32 dist2 = dot(d, d);
     if (dist2 >= s.r * s.r) {
         return false;
     }
-    const f32 dist = std::sqrt(dist2);
-    n = dist > 1e-4f ? d * (1.0f / dist) : V3{0.0f, 0.0f, -1.0f};
-    p = s.c + n * s.r;
+    const f32 b = dot(d, back);
+    const f32 disc = b * b - (dist2 - s.r * s.r);
+    const f32 t = -b + std::sqrt(disc > 0.0f ? disc : 0.0f);
+    p = p + back * t;
     return true;
 }
 
@@ -473,7 +477,7 @@ int Cape_c::Execute() {
                 collideBoxInward(p, boxes[k], back, n);
             }
             for (int k = 0; k < kBodySphereCount; k++) {
-                collideSphere(p, spheres[k], n);
+                collideSphere(p, spheres[k], back);
             }
         }
     };
@@ -494,7 +498,7 @@ int Cape_c::Execute() {
     // Straight down from the waist row, pushed out of his body where it is in the way. The
     // constraint lengths come from this shape, so the bumps of his tunic and boots don't stretch
     // the cloth, and the cloth is gently pulled toward it (see Stiffness).
-    const f32 hipLen = 15.0f;  // collar-to-waist span of the rigid part
+    const f32 hipLen = 28.5f;  // collar-to-waist span of the rigid part
     const f32 vRestLow = (gTuning.length > hipLen + 20.0f ? gTuning.length - hipLen : 20.0f) /
                          (kRows - 1 - kRigid);
     const f32 groundY = link->current.pos.y + 2.0f;
@@ -543,8 +547,11 @@ int Cape_c::Execute() {
                 vel = vel * (kMaxSpeed / speed);
             }
             prev = p;
-            p = p + vel + V3{0.0f, -kGravity, 0.0f} + back * (stream * rowT);
-            p = p + (rest[i] - p) * spring;
+            // The hem is looser than the top of the hanging part: it is pulled back to the resting
+            // shape less and streams out more, so the bottom flows.
+            const f32 loose = rowT * rowT;
+            p = p + vel + V3{0.0f, -kGravity, 0.0f} + back * (stream * (0.3f + 2.2f * loose));
+            p = p + (rest[i] - p) * (spring * (1.0f - 0.85f * loose));
         }
     }
 
@@ -589,9 +596,9 @@ int Cape_c::Execute() {
                     }
                 }
                 for (int k = 0; k < kBodySphereCount; k++) {
-                    if (collideSphere(p, spheres[k], n)) {
+                    if (collideSphere(p, spheres[k], back)) {
                         hit = true;
-                        hitN = hitN + n;
+                        hitN = hitN + back;
                     }
                 }
                 if (hit) {

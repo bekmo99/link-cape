@@ -25,7 +25,7 @@ struct Tuning {
     bool enabled = true;
     bool heroOnly = true;    // only show the cape while Link wears the Hero's Clothes
     bool flipFaces = false;  // swap which side of the cloth counts as "outside" (see README)
-    f32 length = 100.0f;     // cape length, collar to hem
+    f32 length = 110.0f;     // cape length, collar to hem
     f32 stiffness = 40.0f;   // 0..100, how strongly the hanging cape is pulled back to its resting shape
 };
 extern Tuning gTuning;

@@ -49,6 +49,7 @@ his body. Open the **Mods** window, select *Link's Cape*, and adjust:
 | Distance behind back | Moves them away from his back (increase if the cape is inside him) |
 | Half width | Half the distance between the two attachment points |
 | Length | How long the cape is |
+| Waist clearance | Extra room around his hips, belt and tunic flap (raise it if the tunic pokes through) |
 | Stiffness | How strongly the cloth below the hips is pulled back to its body-hugging shape (higher = stiffer, less sway) |
 | Hero's Clothes only | Only show the cape while Link wears the Hero's Clothes (on by default) |
 | Shoulder wrap | How far the top corners curl forward over the shoulders (0 = flat) |

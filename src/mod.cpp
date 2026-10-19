@@ -34,6 +34,7 @@ static ConfigVarHandle sLengthVar = 0;
 static ConfigVarHandle sWrapVar = 0;
 static ConfigVarHandle sPaddingVar = 0;
 static ConfigVarHandle sStiffVar = 0;
+static ConfigVarHandle sClearVar = 0;
 
 static ModResult registerBool(const char* name, bool def, ConfigVarHandle* out) {
     ConfigVarDesc desc = CONFIG_VAR_DESC_INIT;
@@ -77,6 +78,9 @@ static void refreshTuning() {
     }
     if (svc_config->get_int(mod_ctx, sWrapVar, &i) == MOD_OK) {
         gTuning.wrap = static_cast<f32>(i);
+    }
+    if (svc_config->get_int(mod_ctx, sClearVar, &i) == MOD_OK) {
+        gTuning.waistClear = static_cast<f32>(i);
     }
     if (svc_config->get_int(mod_ctx, sStiffVar, &i) == MOD_OK) {
         gTuning.stiffness = static_cast<f32>(i);
@@ -140,6 +144,10 @@ static ModResult buildPanel(ModContext*, UiElementHandle panel, void*, ModError*
         sWrapVar, 0, 50, " units");
 
     svc_ui->pane_add_section(mod_ctx, panel, "Collision");
+    addNumber(panel, "Waist clearance",
+        "Extra room around his hips, belt and tunic flap. Raise it if the tunic pokes through the "
+        "lower cape.",
+        sClearVar, 0, 30, " units");
     addNumber(panel, "Body padding",
         "Extra clearance around Link's body. Raise it if the cape clips his shield, sword or "
         "bulky outfits.",
@@ -201,6 +209,7 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         registerInt("length", 110, &sLengthVar) != MOD_OK ||
         registerInt("wrap", 14, &sWrapVar) != MOD_OK ||
         registerInt("stiffness", 40, &sStiffVar) != MOD_OK ||
+        registerInt("waist_clear", 6, &sClearVar) != MOD_OK ||
         registerInt("padding", 2, &sPaddingVar) != MOD_OK)
     {
         svc_log->error(mod_ctx, "failed to register config vars");

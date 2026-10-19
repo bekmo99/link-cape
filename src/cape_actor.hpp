@@ -31,6 +31,7 @@ struct Tuning {
     f32 length = 110.0f;     // cape length
     f32 wrap = 14.0f;        // how far the top corners curl forward around the shoulders
     f32 stiffness = 40.0f;   // 0..100, how strongly the lower cape is pulled back to its resting shape
+    f32 waistClear = 6.0f;   // extra clearance around the hips, belt and tunic flap
     f32 padding = 2.0f;      // extra clearance added to every body collider (gear, bulky outfits)
 };
 extern Tuning gTuning;
@@ -83,6 +84,11 @@ private:
     V3 mLastLinkPos;
     bool mSimInit;
     f32 mStream = 0.0f;  // smoothed run-speed push
+    // The rigid upper part, stored relative to Link's spine and waist joints (see Execute)
+    bool mCalib = false;
+    f32 mCalibKey[6] = {0, 0, 0, 0, 0, 0};
+    V3 mLocS[(5) * kCols];
+    V3 mLocW[(5) * kCols];
 };
 
 }  // namespace lnkcape

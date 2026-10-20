@@ -151,11 +151,14 @@ def hw(y):
     return 14.0+(HALFW-14.0)*min(1.0,max(0.0,(Y_TOP-y)/15.0))
 rigid=[]  # per row, per col: (lChest,lWaist)
 pts=[]
+# Depth (z) of every pinned point first. The body has a slight hollow just above the belt, and a
+# cape following it exactly looked "sucked in" there, so below the shoulder blades the depth only
+# ever moves outward going down, as a straight ramp to the belt row.
+ZB=np.zeros((kRigid+1,kCols))
 for r in range(kRigid+1):
     y=Y_TOP+(Y_HIP-Y_TOP)*r/kRigid
     for c in range(kCols):
         u=1-2*c/(kCols-1); x=u*hw(y)
-        # surface from upbody only above waist belt; smooth: min over a few x
         zs=[]
         for sx in (x,-x):
             for dx in (-3,0,3):
@@ -163,9 +166,17 @@ for r in range(kRigid+1):
                 if z is not None: zs.append(z)
         z=min(zs) if zs else -10.0
         z=max(-13.0,min(-3.0,z))
-        # the top rows sink into the body so a little drift in motion stays hidden under the mesh
-        off=[+3.0,+1.8,+0.8,0.0,-0.8,-0.8][r]
-        p=np.array([x,y,z+off])
+        ZB[r,c]=z+[+3.0,+1.8,+0.8,0.0,-0.8,-0.8][r]
+for c in range(kCols):
+    z2=ZB[2,c]; z5=min(ZB[5,c],z2)
+    for r in range(3,kRigid+1):
+        ZB[r,c]=min(ZB[r,c], z2+(z5-z2)*(r-2)/(kRigid-2))
+for r in range(kRigid+1):
+    y=Y_TOP+(Y_HIP-Y_TOP)*r/kRigid
+    for c in range(kCols):
+        u=1-2*c/(kCols-1); x=u*hw(y)
+        # surface from upbody only above waist belt; smooth: min over a few x
+        p=np.array([x,y,ZB[r,c]])
         pts.append(p)
         # skin weights: average of the nearest body vertices' weights (chest / spine / waist)
         d=np.linalg.norm(V-p,axis=1); nn=np.argsort(d)[:8]

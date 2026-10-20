@@ -697,10 +697,15 @@ int Cape_c::Execute() {
         mPacket.mSnap = true;
         mSphereInit = false;
     }
+    // How fast he really moves (units per tick), measured, in case the actor's speed field is 0
+    // for some movement states.
+    const f32 moveSpeed = std::sqrt((linkPos.x - mLastLinkPos.x) * (linkPos.x - mLastLinkPos.x) +
+                                    (linkPos.z - mLastLinkPos.z) * (linkPos.z - mLastLinkPos.z));
     mLastLinkPos = linkPos;
 
     // --- Integrate the hanging part ----------------------------------------------------------
-    const f32 streamTarget = link->speedF > 0.0f ? link->speedF * kRunStream : 0.0f;
+    const f32 runSpeed = std::min(std::max(link->speedF, moveSpeed), 40.0f);
+    const f32 streamTarget = runSpeed * kRunStream;
     mStream += (streamTarget - mStream) * 0.2f;  // smoothed so starting / stopping doesn't snap it
     const f32 stream = mStream;
     const f32 spring = 0.003f * gTuning.stiffness;
@@ -710,14 +715,14 @@ int Cape_c::Execute() {
     // the hanging part, curving gradually back toward the hem. The cloth is drawn toward this
     // curve ("target") instead of toward a plain vertical hang, and gravity is partly held off by
     // the same amount, so it streams out instead of folding down at a sharp bend.
-    const f32 flare = std::min(1.0f, mStream / (kRunStream * 16.0f));
+    const f32 flare = std::min(1.0f, mStream / (kRunStream * 12.0f));
     V3 target[kCount];
     {
         f32 offBack[kRows] = {};
         f32 offUp[kRows] = {};
         for (int r = kRigid + 1; r < kRows; r++) {
             const f32 rowT = static_cast<f32>(r - kRigid) / (kRows - 1 - kRigid);
-            const f32 theta = flare * 0.95f * std::pow(rowT, 1.3f);
+            const f32 theta = flare * 1.15f * std::pow(rowT, 1.2f);
             offBack[r] = offBack[r - 1] + vRestLow * std::sin(theta);
             offUp[r] = offUp[r - 1] + vRestLow * (1.0f - std::cos(theta));
         }
@@ -750,7 +755,7 @@ int Cape_c::Execute() {
             const f32 loose = rowT * rowT;
             const f32 gravity = kGravity * (1.0f - flare * 0.85f * std::pow(rowT, 0.8f));
             p = p + vel + V3{0.0f, -gravity, 0.0f} + back * (stream * (0.3f + 1.2f * loose));
-            p = p + (target[i] - p) * (spring * (1.0f - 0.85f * loose));
+            p = p + (target[i] - p) * (spring * (1.0f - 0.85f * loose) + flare * 0.05f * loose);
         }
     }
 

@@ -442,7 +442,9 @@ static bool collideBoxInward(V3& p, const Box& b, const V3& back, V3& nOut) {
     if (w < 0.02f) {
         return false;
     }
-    p = p + nOut * ((dist + 0.5f) * w);
+    // Never more than a few units: the gear's inner face can lie inside his body, and pushing the
+    // cloth all the way there shoved it into him.
+    p = p + nOut * std::min((dist + 0.5f) * w, 5.0f);
     return true;
 }
 

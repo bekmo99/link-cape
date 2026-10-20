@@ -16,6 +16,11 @@ constexpr int kCols = 13;
 constexpr int kRows = 16;
 constexpr int kCount = kCols * kRows;
 
+// The cloth is drawn subdivided (Catmull-Rom through the simulated points) so the surface is smooth.
+constexpr int kSub = 3;
+constexpr int kRefCols = (kCols - 1) * kSub + 1;
+constexpr int kRefRows = (kRows - 1) * kSub + 1;
+
 struct V3 {
     f32 x, y, z;
 };
@@ -47,6 +52,8 @@ public:
     V3 mNrmPrev[kCount];
     V3 mDrawPos[kCount];
     V3 mDrawNrm[kCount];
+    V3 mRefPos[kRefCols * kRefRows];
+    V3 mRefNrm[kRefCols * kRefRows];
     double mTickTime = 0.0;      // seconds, when the latest tick finished
     double mTickInterval = 1.0 / 30.0;
     int mDrawsThisTick = 0;
@@ -90,6 +97,7 @@ private:
     int mAxSide[3] = {0, 0, 0};
     f32 mAxUpSign[3] = {1.0f, 1.0f, 1.0f};
     f32 mAxSideSign[3] = {1.0f, 1.0f, 1.0f};
+    int mAxBad[3] = {0, 0, 0};  // consecutive ticks the joint matrix disagreed with the joint positions
 };
 
 }  // namespace lnkcape

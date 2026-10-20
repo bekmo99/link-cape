@@ -74,28 +74,78 @@ static void initTexture() {
 
 static void submitCloth(const Packet_c& pk, bool inside) {
     const f32 ns = inside ? -1.0f : 1.0f;
-    GXBegin(GX_TRIANGLES, GX_VTXFMT0, (kRows - 1) * (kCols - 1) * 6);
-    for (int r = 0; r < kRows - 1; r++) {
-        for (int c = 0; c < kCols - 1; c++) {
-            const int i00 = r * kCols + c;
+    GXBegin(GX_TRIANGLES, GX_VTXFMT0, (kRefRows - 1) * (kRefCols - 1) * 6);
+    for (int r = 0; r < kRefRows - 1; r++) {
+        for (int c = 0; c < kRefCols - 1; c++) {
+            const int i00 = r * kRefCols + c;
             const int i01 = i00 + 1;
-            const int i10 = i00 + kCols;
+            const int i10 = i00 + kRefCols;
             const int i11 = i10 + 1;
             const int order[6] = {i00, i10, i11, i00, i11, i01};
             const int flipped[6] = {i00, i11, i10, i00, i01, i11};
             const int* idx = pk.mFlip ? flipped : order;
             for (int k = 0; k < 6; k++) {
                 const int i = idx[k];
-                const V3& p = pk.mDrawPos[i];
-                const V3& n = pk.mDrawNrm[i];
+                const V3& p = pk.mRefPos[i];
+                const V3& n = pk.mRefNrm[i];
                 GXPosition3f32(p.x, p.y, p.z);
                 GXNormal3f32(n.x * ns, n.y * ns, n.z * ns);
-                GXTexCoord2f32(
-                    static_cast<f32>(i % kCols) / (kCols - 1), static_cast<f32>(i / kCols) / (kRows - 1));
+                GXTexCoord2f32(static_cast<f32>(i % kRefCols) / (kRefCols - 1),
+                    static_cast<f32>(i / kRefCols) / (kRefRows - 1));
             }
         }
     }
     GXEnd();
+}
+
+// Catmull-Rom spline through p1..p2 (t in 0..1), p0 and p3 being the neighbours.
+static V3 catmullRom(const V3& p0, const V3& p1, const V3& p2, const V3& p3, f32 t) {
+    const f32 t2 = t * t;
+    const f32 t3 = t2 * t;
+    return (p1 * 2.0f + (p2 - p0) * t + (p0 * 2.0f - p1 * 5.0f + p2 * 4.0f - p3) * t2 +
+               (p1 * 3.0f - p0 - p2 * 3.0f + p3) * t3) * 0.5f;
+}
+
+// Builds the smooth, subdivided surface (and its normals) from the simulated grid.
+static void refineCloth(Packet_c& pk) {
+    static V3 tmp[kRows * kRefCols];
+    for (int r = 0; r < kRows; r++) {
+        for (int c = 0; c < kCols - 1; c++) {
+            const V3& p0 = pk.mDrawPos[r * kCols + (c > 0 ? c - 1 : 0)];
+            const V3& p1 = pk.mDrawPos[r * kCols + c];
+            const V3& p2 = pk.mDrawPos[r * kCols + c + 1];
+            const V3& p3 = pk.mDrawPos[r * kCols + (c + 2 < kCols ? c + 2 : kCols - 1)];
+            for (int sub = 0; sub < kSub; sub++) {
+                tmp[r * kRefCols + c * kSub + sub] =
+                    catmullRom(p0, p1, p2, p3, static_cast<f32>(sub) / kSub);
+            }
+        }
+        tmp[r * kRefCols + kRefCols - 1] = pk.mDrawPos[r * kCols + kCols - 1];
+    }
+    for (int c = 0; c < kRefCols; c++) {
+        for (int r = 0; r < kRows - 1; r++) {
+            const V3& p0 = tmp[(r > 0 ? r - 1 : 0) * kRefCols + c];
+            const V3& p1 = tmp[r * kRefCols + c];
+            const V3& p2 = tmp[(r + 1) * kRefCols + c];
+            const V3& p3 = tmp[(r + 2 < kRows ? r + 2 : kRows - 1) * kRefCols + c];
+            for (int sub = 0; sub < kSub; sub++) {
+                pk.mRefPos[(r * kSub + sub) * kRefCols + c] =
+                    catmullRom(p0, p1, p2, p3, static_cast<f32>(sub) / kSub);
+            }
+        }
+        pk.mRefPos[(kRefRows - 1) * kRefCols + c] = tmp[(kRows - 1) * kRefCols + c];
+    }
+    for (int r = 0; r < kRefRows; r++) {
+        for (int c = 0; c < kRefCols; c++) {
+            const int r0 = r > 0 ? r - 1 : r;
+            const int r1 = r < kRefRows - 1 ? r + 1 : r;
+            const int c0 = c > 0 ? c - 1 : c;
+            const int c1 = c < kRefCols - 1 ? c + 1 : c;
+            const V3 dx = pk.mRefPos[r * kRefCols + c1] - pk.mRefPos[r * kRefCols + c0];
+            const V3 dy = pk.mRefPos[r1 * kRefCols + c] - pk.mRefPos[r0 * kRefCols + c];
+            pk.mRefNrm[r * kRefCols + c] = normalized(cross(dy, dx), V3{0.0f, 0.0f, -1.0f});
+        }
+    }
 }
 
 void Packet_c::draw() {
@@ -119,6 +169,7 @@ void Packet_c::draw() {
         mDrawPos[i] = mPosPrev[i] + (mPos[i] - mPosPrev[i]) * alpha;
         mDrawNrm[i] = normalized(mNrmPrev[i] + (mNrm[i] - mNrmPrev[i]) * alpha, mNrm[i]);
     }
+    refineCloth(*this);
 
     j3dSys.reinitGX();
     GXSetNumIndStages(0);
@@ -439,13 +490,22 @@ int Cape_c::Execute() {
 
     // Spine, chest and waist take their orientation straight from the game's joint matrices, so the
     // pinned part of the cape follows their twist too. Which matrix column is which axis is not
-    // documented, so it is worked out once, while he is standing upright and still.
+    // documented, so it is worked out once, while he is standing upright and still, and only if the
+    // skeleton looks like the real thing (right after spawning the matrices can still be empty, and
+    // calibrating then gave a cape stuck sideways). Every tick the result is checked against the
+    // joint positions; if it disagrees for a while it is thrown away and measured again.
     {
         const V3 hipSide = normalized(P[17] - P[22], V3{1.0f, 0.0f, 0.0f});
         const int joints[3] = {1, 2, 16};
         const V3 refUp[3] = {P[2] - P[1], P[3] - P[2], P[2] - P[16]};
         const int groups[3] = {1, 0, 2};
-        const bool upright = dot(normalized(P[3] - P[2], up), up) > 0.9f &&
+        const f32 lenNeck = length(P[3] - P[2]);
+        const f32 lenSpine = length(P[2] - P[16]);
+        const f32 lenHips = length(P[17] - P[22]);
+        const bool plausible = lenNeck > 14.0f && lenNeck < 26.0f && lenSpine > 15.0f &&
+                               lenSpine < 28.0f && lenHips > 8.0f && lenHips < 18.0f &&
+                               P[2].y > P[16].y;
+        const bool upright = plausible && dot(normalized(P[3] - P[2], up), up) > 0.9f &&
                              dot(normalized(P[2] - P[16], up), up) > 0.85f && link->speedF < 0.5f;
         for (int a = 0; a < 3; a++) {
             MtxP m = link->mpLinkModel->getAnmMtx(joints[a]);
@@ -453,8 +513,8 @@ int Cape_c::Execute() {
             for (int k = 0; k < 3; k++) {
                 col[k] = normalized(V3{m[0][k], m[1][k], m[2][k]}, V3{0.0f, 1.0f, 0.0f});
             }
+            const V3 ru = normalized(refUp[a], up);
             if (!mAxValid[a] && upright) {
-                const V3 ru = normalized(refUp[a], up);
                 int iu = 0;
                 for (int k = 1; k < 3; k++) {
                     if (std::fabs(dot(col[k], ru)) > std::fabs(dot(col[iu], ru))) {
@@ -467,12 +527,16 @@ int Cape_c::Execute() {
                         is = k;
                     }
                 }
-                if (std::fabs(dot(col[iu], ru)) > 0.8f && std::fabs(dot(col[is], hipSide)) > 0.8f) {
+                const int ifw = 3 - iu - is;
+                if (std::fabs(dot(col[iu], ru)) > 0.8f && std::fabs(dot(col[is], hipSide)) > 0.8f &&
+                    std::fabs(dot(col[ifw], forward)) > 0.7f)
+                {
                     mAxUp[a] = iu;
                     mAxSide[a] = is;
                     mAxUpSign[a] = dot(col[iu], ru) < 0.0f ? -1.0f : 1.0f;
                     mAxSideSign[a] = dot(col[is], hipSide) < 0.0f ? -1.0f : 1.0f;
                     mAxValid[a] = true;
+                    mAxBad[a] = 0;
                 }
             }
             if (mAxValid[a]) {
@@ -480,7 +544,12 @@ int Cape_c::Execute() {
                 f.y = col[mAxUp[a]] * mAxUpSign[a];
                 f.x = col[mAxSide[a]] * mAxSideSign[a];
                 f.z = cross(f.x, f.y) * handed;
-                fr[groups[a]] = f;
+                if (dot(f.y, ru) > 0.5f && dot(f.x, hipSide) > 0.2f) {
+                    fr[groups[a]] = f;
+                    mAxBad[a] = 0;
+                } else if (++mAxBad[a] > 20) {
+                    mAxValid[a] = false;  // measured wrongly: start over
+                }
             }
         }
     }
@@ -696,6 +765,44 @@ int Cape_c::Execute() {
     }
     for (int i = 0; i < (kRigid + 1) * kCols; i++) {
         mP[i] = rest[i];
+    }
+
+    // --- Smooth out spikes ---------------------------------------------------------------------
+    // A point shoved far out by a swinging flap or leg used to stick out as a sharp point. Relax
+    // how far each point is from its resting spot toward its neighbours', then push the cloth back
+    // out of the body once more so the smoothing can't sink it in.
+    {
+        V3 dev[kCount];
+        for (int pass = 0; pass < 2; pass++) {
+            for (int r = kRigid + 1; r < kRows; r++) {
+                for (int c = 0; c < kCols; c++) {
+                    const int i = r * kCols + c;
+                    dev[i] = mP[i] - rest[i];
+                }
+            }
+            for (int r = kRigid + 1; r < kRows; r++) {
+                for (int c = 0; c < kCols; c++) {
+                    const int i = r * kCols + c;
+                    const V3& l = dev[r * kCols + (c > 0 ? c - 1 : c)];
+                    const V3& rr = dev[r * kCols + (c < kCols - 1 ? c + 1 : c)];
+                    const V3& u = dev[(r > kRigid + 1 ? r - 1 : r) * kCols + c];
+                    const V3& d = dev[(r < kRows - 1 ? r + 1 : r) * kCols + c];
+                    const V3 avg = (l + rr + u + d) * 0.25f;
+                    mP[i] = rest[i] + dev[i] * 0.5f + avg * 0.5f;
+                }
+            }
+        }
+        for (int r = kRigid + 1; r < kRows; r++) {
+            for (int c = 0; c < kCols; c++) {
+                V3& p = mP[r * kCols + c];
+                for (int k = 0; k < kBodySphereCount; k++) {
+                    collideSphere(p, spheres[k], back);
+                }
+                if (p.y < groundY) {
+                    p.y = groundY;
+                }
+            }
+        }
     }
 
     // --- Keep the hanging cloth sane -----------------------------------------------------------

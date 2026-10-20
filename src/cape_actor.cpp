@@ -138,24 +138,15 @@ static void refineCloth(Packet_c& pk) {
         }
         pk.mRefPos[(kRefRows - 1) * kRefCols + c] = tmp[(kRows - 1) * kRefCols + c];
     }
-    // Lighting normals from a wide stencil (one whole cell each way) so small wobbles in the cloth
-    // don't turn into dark and light bumps, then eased toward the direction his back faces over the
-    // pinned part, where the cloth is meant to be smooth.
     for (int r = 0; r < kRefRows; r++) {
         for (int c = 0; c < kRefCols; c++) {
-            const int r0 = std::max(r - kSub, 0);
-            const int r1 = std::min(r + kSub, kRefRows - 1);
-            const int c0 = std::max(c - kSub, 0);
-            const int c1 = std::min(c + kSub, kRefCols - 1);
+            const int r0 = r > 0 ? r - 1 : r;
+            const int r1 = r < kRefRows - 1 ? r + 1 : r;
+            const int c0 = c > 0 ? c - 1 : c;
+            const int c1 = c < kRefCols - 1 ? c + 1 : c;
             const V3 dx = pk.mRefPos[r * kRefCols + c1] - pk.mRefPos[r * kRefCols + c0];
             const V3 dy = pk.mRefPos[r1 * kRefCols + c] - pk.mRefPos[r0 * kRefCols + c];
-            V3 n = normalized(cross(dy, dx), pk.mBack);
-            const f32 rowF = static_cast<f32>(r) / kSub;  // original row units
-            const f32 kPinnedRows = 5.0f;  // same as kRigid below
-            f32 kb = 1.0f - (rowF - kPinnedRows) / 1.5f;
-            kb = kb > 1.0f ? 1.0f : (kb < 0.0f ? 0.0f : kb);
-            kb *= 0.7f;
-            pk.mRefNrm[r * kRefCols + c] = normalized(n * (1.0f - kb) + pk.mBack * kb, pk.mBack);
+            pk.mRefNrm[r * kRefCols + c] = normalized(cross(dy, dx), V3{0.0f, 0.0f, -1.0f});
         }
     }
 }
@@ -262,7 +253,7 @@ constexpr f32 kDrag = 0.12f;        // fraction of velocity lost per tick
 constexpr f32 kGravity = 0.9f;      // units per tick^2
 constexpr f32 kRunStream = 0.007f;  // extra backward push per unit of Link's forward speed
 constexpr f32 kWiden = 0.20f;       // how much wider the hem is than the hips
-constexpr f32 kMaxSkinDrift = 5.0f;  // how far the skinned pinned points may stray from the simple estimate
+constexpr f32 kMaxSkinDrift = 9.0f;  // how far the skinned pinned points may stray from the simple estimate
 constexpr f32 kSkin = 1.0f;         // the cloth rides this far outside the body
 
 static void solveDistance(V3& a, V3& b, f32 rest, bool pinA, bool pinB) {
@@ -665,28 +656,60 @@ int Cape_c::Execute() {
         const V3 side = {std::cos(angle), 0.0f, -std::sin(angle)};
         const V3 dirChest = normalized(P[3] - P[2], up);
         const V3 dirWaist = normalized(P[2] - P[16], up);
+        // How far the skinned position is from the estimate, at every pinned point. This
+        // difference is then smoothed across the grid and limited as a whole. Limiting each point
+        // on its own (a hard cut at some distance) left bumps: neighbours just either side of the
+        // cut were treated differently, and which ones were over the limit changed as he turned.
+        constexpr int kPinCount = (kRigid + 1) * kCols;
+        V3 base[kPinCount];
+        V3 diff[kPinCount];
         f32 worst = 0.0f;
         for (int r = 0; r <= kRigid; r++) {
             for (int c = 0; c < kCols; c++) {
-                const RigidPoint& rp = kRigidPoints[r * kCols + c];
+                const int i = r * kCols + c;
+                const RigidPoint& rp = kRigidPoints[i];
                 const f32 yb = rp.chest[1] + 124.0f;  // bind height (chest local = bind - chest origin)
                 const V3 axisPoint = yb >= 124.0f ? P[2] + dirChest * (yb - 124.0f)
                                                   : P[16] + dirWaist * (yb - 103.0f);
-                const V3 safe = axisPoint + side * rp.chest[0] + forward * rp.chest[2];
+                base[i] = axisPoint + side * rp.chest[0] + forward * rp.chest[2];
                 // Linear blend skinning with the chest, spine and waist, like the body mesh itself.
-                V3 skinned = fromLocal(P[2], fr[0], rp.chest) * rp.w[0] +
-                             fromLocal(P[1], fr[1], rp.spine) * rp.w[1] +
-                             fromLocal(P[16], fr[2], rp.waist) * rp.w[2];
-                const V3 diff = skinned - safe;
-                const f32 dl = length(diff);
-                if (dl > worst) {
-                    worst = dl;
-                }
-                if (dl > kMaxSkinDrift) {
-                    skinned = safe + diff * (kMaxSkinDrift / dl);
-                }
-                rest[r * kCols + c] = skinned;
+                const V3 skinned = fromLocal(P[2], fr[0], rp.chest) * rp.w[0] +
+                                   fromLocal(P[1], fr[1], rp.spine) * rp.w[1] +
+                                   fromLocal(P[16], fr[2], rp.waist) * rp.w[2];
+                diff[i] = skinned - base[i];
+                worst = std::max(worst, length(diff[i]));
             }
+        }
+        for (int pass = 0; pass < 2; pass++) {
+            V3 tmpD[kPinCount];
+            for (int r = 0; r <= kRigid; r++) {
+                for (int c = 0; c < kCols; c++) {
+                    V3 sum = {0.0f, 0.0f, 0.0f};
+                    f32 wsum = 0.0f;
+                    for (int dr = -1; dr <= 1; dr++) {
+                        for (int dc = -1; dc <= 1; dc++) {
+                            const int rr = r + dr;
+                            const int cc = c + dc;
+                            if (rr < 0 || rr > kRigid || cc < 0 || cc >= kCols) {
+                                continue;
+                            }
+                            const f32 w = (dr == 0 ? 2.0f : 1.0f) * (dc == 0 ? 2.0f : 1.0f);
+                            sum = sum + diff[rr * kCols + cc] * w;
+                            wsum += w;
+                        }
+                    }
+                    tmpD[r * kCols + c] = sum * (1.0f / wsum);
+                }
+            }
+            std::memcpy(diff, tmpD, sizeof(diff));
+        }
+        for (int i = 0; i < kPinCount; i++) {
+            const f32 dl = length(diff[i]);
+            V3 d = diff[i];
+            if (dl > kMaxSkinDrift) {
+                d = d * (kMaxSkinDrift / dl);
+            }
+            rest[i] = base[i] + d;
         }
         if (worst > 6.0f && gLogWarn != nullptr && mLogCooldown <= 0) {
             char msg[200];
@@ -971,7 +994,6 @@ int Cape_c::Execute() {
         }
     }
     mPacket.mTickTime = nowSec;
-    mPacket.mBack = back;
     mPacket.mDrawsLastTick = mPacket.mDrawsThisTick;
     // Decide whether to blend between ticks from a smoothed draws-per-tick count, with hysteresis.
     // (Switching on a single tick's count made the cape flip between "ahead" and "behind" and bounce.)
@@ -991,37 +1013,6 @@ int Cape_c::Execute() {
             mPacket.mPos[i] = smooth ? mPacket.mPos[i] + (mP[i] - mPacket.mPos[i]) *
                 (0.65f - 0.25f * static_cast<f32>(r - kRigid) / static_cast<f32>(kRows - 1 - kRigid)) : mP[i];
             mPacket.mNrm[i] = normalized(gridNormal(r, c) * sign, back);
-        }
-    }
-    // Smooth the lighting normals. Tiny wobbles in the cloth made them vary from point to point,
-    // which showed up as dark and light bumps that depend on which way he faces (the light is
-    // fixed in the world). Over the pinned part they follow his back direction closely.
-    {
-        V3 raw[kCount];
-        for (int pass = 0; pass < 2; pass++) {
-            for (int i = 0; i < kCount; i++) {
-                raw[i] = mPacket.mNrm[i];
-            }
-            for (int r = 0; r < kRows; r++) {
-                for (int c = 0; c < kCols; c++) {
-                    V3 sum = {0.0f, 0.0f, 0.0f};
-                    for (int dr = -1; dr <= 1; dr++) {
-                        for (int dc = -1; dc <= 1; dc++) {
-                            const int rr = std::min(std::max(r + dr, 0), kRows - 1);
-                            const int cc = std::min(std::max(c + dc, 0), kCols - 1);
-                            sum = sum + raw[rr * kCols + cc];
-                        }
-                    }
-                    mPacket.mNrm[r * kCols + c] = normalized(sum, back);
-                }
-            }
-        }
-        for (int r = 0; r <= kRigid + 1; r++) {
-            const f32 k = r <= kRigid ? 0.7f : 0.35f;
-            for (int c = 0; c < kCols; c++) {
-                V3& n = mPacket.mNrm[r * kCols + c];
-                n = normalized(n * (1.0f - k) + back * k, back);
-            }
         }
     }
     if (mPacket.mSnap) {

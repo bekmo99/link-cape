@@ -75,6 +75,7 @@ public:
     V3 mLocWaist[kPinnedRows * kCols];
     f32 mRowWaist[kPinnedRows] = {};  // how much each pinned row follows the waist (rest: chest)
     bool mAttachValid = false;
+    u32 mParentId = 0xFFFFFFFF;  // Link's actor id: the joint matrices above belong to his model
 };
 
 class Cape_c : public fopAc_ac_c {

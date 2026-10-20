@@ -121,6 +121,11 @@ static int sSpawnCooldown = 0;
 // all we need to do is make sure there is one whenever Link exists.
 static void ensureCape() {
     if (Cape_c::sInstance != nullptr) {
+        // A cape whose Link is gone (death, game over, stage change) must not linger.
+        fopAc_ac_c* owner = fopAcM_SearchByID(Cape_c::sInstance->parentActorID);
+        if (owner == nullptr || fopAcM_GetName(owner) != fpcNm_ALINK_e) {
+            fopAcM_delete(Cape_c::sInstance);
+        }
         return;
     }
     if (sSpawnCooldown > 0) {

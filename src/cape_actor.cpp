@@ -198,6 +198,24 @@ void Packet_c::draw() {
     if (!mVisible || mTevStr == nullptr) {
         return;
     }
+    // This can run for a frame or two after Link is gone (death, game over, respawn). His model and
+    // its joint matrices may already be freed then, so check they are still the ones we remembered.
+    {
+        fopAc_ac_c* par = fopAcM_SearchByID(mParentId);
+        if (par == nullptr || fopAcM_GetName(par) != fpcNm_ALINK_e) {
+            mVisible = false;
+            mAttachValid = false;
+            return;
+        }
+        daAlink_c* owner = static_cast<daAlink_c*>(par);
+        if (owner->mpLinkModel == nullptr || owner->mpLinkModel->getModelData() == nullptr ||
+            owner->mpLinkModel->getModelData()->getJointNum() < 17 ||
+            owner->mpLinkModel->getAnmMtx(2) != mJointMtx[0] ||
+            owner->mpLinkModel->getAnmMtx(16) != mJointMtx[1])
+        {
+            mAttachValid = false;
+        }
+    }
     initTexture();
 
     // Interpolate between the last two ticks when the game draws more often than it simulates;
@@ -548,6 +566,7 @@ cPhs_Step Cape_c::create() {
     mLastLinkPos = {0.0f, 0.0f, 0.0f};
     mPacket.mVisible = false;
     mPacket.mAttachValid = false;
+    mPacket.mParentId = parentActorID;
     current.pos = home.pos;  // overwritten every tick once we have a parent
     scale.set(1.0f, 1.0f, 1.0f);
     return cPhs_COMPLEATE_e;
@@ -565,9 +584,12 @@ int Cape_c::Execute() {
     // The cape lives and dies with Link (stage changes, game over, ...).
     fopAc_ac_c* parent = fopAcM_SearchByID(parentActorID);
     if (parent == nullptr || fopAcM_GetName(parent) != fpcNm_ALINK_e) {
+        mPacket.mVisible = false;
+        mPacket.mAttachValid = false;
         fopAcM_delete(this);
         return 1;
     }
+    mPacket.mParentId = parentActorID;
     daAlink_c* link = static_cast<daAlink_c*>(parent);
     // The cape is built for one specific model, so make sure we really are looking at its skeleton.
     if (link->mpLinkModel == nullptr || link->mpLinkModel->getModelData() == nullptr ||
@@ -1297,6 +1319,14 @@ int Cape_c::Execute() {
 }
 
 int Cape_c::Draw() {
+    // Link can be gone (death / game over / respawn) while the cape still exists for a few frames:
+    // never draw or touch his model then.
+    fopAc_ac_c* parent = fopAcM_SearchByID(parentActorID);
+    if (parent == nullptr || fopAcM_GetName(parent) != fpcNm_ALINK_e) {
+        mPacket.mVisible = false;
+        mPacket.mAttachValid = false;
+        return 1;
+    }
     if (!mPacket.mVisible) {
         return 1;
     }

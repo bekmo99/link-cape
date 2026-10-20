@@ -238,11 +238,18 @@ void Packet_c::draw() {
                 mDrawPos[i] = w;
             }
         }
+        // The rest of the cape moves along with the same shift as a whole (a rigid shift cannot
+        // stretch it; fading it out toward the hem did, at speed, e.g. on horseback), limited so a
+        // timing mismatch can never drag it far.
+        for (int c = 0; c < kCols; c++) {
+            const f32 sl = length(shift[c]);
+            if (sl > 8.0f) {
+                shift[c] = shift[c] * (8.0f / sl);
+            }
+        }
         for (int r = kPinnedRows; r < kRows; r++) {
-            const f32 f = 1.0f - static_cast<f32>(r - (kPinnedRows - 1)) /
-                                     static_cast<f32>(kRows - (kPinnedRows - 1));
             for (int c = 0; c < kCols; c++) {
-                mDrawPos[r * kCols + c] = mDrawPos[r * kCols + c] + shift[c] * f;
+                mDrawPos[r * kCols + c] = mDrawPos[r * kCols + c] + shift[c];
             }
         }
     }
@@ -913,6 +920,68 @@ int Cape_c::Execute() {
                                     (linkPos.z - mLastLinkPos.z) * (linkPos.z - mLastLinkPos.z));
     mLastLinkPos = linkPos;
 
+    // --- In the water: two states -------------------------------------------------------------
+    // On land the top is pinned to his back and the rest hangs / flows. In water (swimming, or
+    // wading deeper than his knees) the pin is released and the whole cape floats flat on the
+    // surface behind him.
+    {
+        const bool wet = link->mWaterY > -1.0e8f &&
+            (link->checkModeFlg(daAlink_c::MODE_SWIMMING) || link->mWaterY > link->current.pos.y + 70.0f);
+        mSwimTicks = wet ? std::min(mSwimTicks + 1, 12) : std::max(mSwimTicks - 1, 0);
+        const bool wasSwim = mSwimMode;
+        if (!mSwimMode && mSwimTicks >= 6) {
+            mSwimMode = true;
+        } else if (mSwimMode && mSwimTicks == 0) {
+            mSwimMode = false;
+        }
+        if (wasSwim && !mSwimMode) {
+            resetSim(rest);  // back on land: start from the pinned shape (no stretching across)
+            mPacket.mSnap = true;
+        }
+    }
+    const bool swimMode = mSwimMode;
+    if (swimMode) {
+        const f32 surf = link->mWaterY + 1.0f;
+        const V3 side = {std::cos(angle), 0.0f, -std::sin(angle)};
+        const V3 O = {P[3].x + back.x * 6.0f, surf, P[3].z + back.z * 6.0f};
+        const f32 seg = gTuning.length / static_cast<f32>(kRows - 1) * 0.85f;
+        V3 T[kCount];
+        for (int r = 0; r < kRows; r++) {
+            const f32 hw = 16.0f + 6.0f * static_cast<f32>(r) / static_cast<f32>(kRows - 1);
+            for (int c = 0; c < kCols; c++) {
+                const f32 x = (1.0f - 2.0f * static_cast<f32>(c) / (kCols - 1)) * hw;
+                T[r * kCols + c] = O + side * x + back * (seg * static_cast<f32>(r));
+            }
+        }
+        for (int i = 0; i < kCount; i++) {
+            const int r = i / kCols;
+            V3 vel = (mP[i] - mPrev[i]) * 0.78f;
+            const f32 sp = length(vel);
+            if (sp > kMaxSpeed) {
+                vel = vel * (kMaxSpeed / sp);
+            }
+            mPrev[i] = mP[i];
+            const f32 k = r == 0 ? 0.35f : 0.12f;
+            mP[i] = mP[i] + vel;
+            mP[i] = mP[i] + (T[i] - mP[i]) * k;
+            mP[i].y = mP[i].y + (surf - mP[i].y) * 0.5f;
+        }
+        for (int it = 0; it < 4; it++) {
+            for (int r = 0; r < kRows; r++) {
+                for (int c = 0; c < kCols; c++) {
+                    const int i = r * kCols + c;
+                    if (r + 1 < kRows) {
+                        solveDistance(mP[i], mP[i + kCols], length(T[i + kCols] - T[i]) * 1.02f, false, false);
+                    }
+                    if (c + 1 < kCols) {
+                        solveDistance(mP[i], mP[i + 1], length(T[i + 1] - T[i]) * 1.02f, false, false);
+                    }
+                }
+            }
+        }
+        mPacket.mAttachValid = false;
+    }
+    if (!swimMode) {
     // --- Integrate the hanging part ----------------------------------------------------------
     const f32 runSpeed = std::min(std::max(link->speedF, moveSpeed), 40.0f);
     const f32 streamTarget = runSpeed * kRunStream;
@@ -1120,6 +1189,8 @@ int Cape_c::Execute() {
         }
     }
 
+    }
+
     // --- Normals and winding for drawing -----------------------------------------------------
     // Normal = dy x dx (down x right) as seen from outside; pick the sign so it faces away from
     // Link, and remember whether our triangle winding needs flipping to match.
@@ -1190,7 +1261,7 @@ int Cape_c::Execute() {
             }
             mPacket.mJointMtx[0] = mc;
             mPacket.mJointMtx[1] = mw;
-            mPacket.mAttachValid = true;
+            mPacket.mAttachValid = !swimMode;
         }
     }
     if (mPacket.mSnap) {

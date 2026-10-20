@@ -104,6 +104,8 @@ private:
     V3 mSphereSm[180];   // body collision spheres, smoothed over time (kBodySphereCount)
     bool mSphereInit = false;
     int mLogCooldown = 0;
+    int mSwimTicks = 0;      // debounce counter for the in-water state
+    bool mSwimMode = false;  // in water: the whole cape is released and floats on the surface
     // Which column of the spine / chest / waist joint matrices is "side" and "up", worked out once
     // while he stands still (index 0 = spine, 1 = chest, 2 = waist). Lets the pinned top follow the
     // real orientation of those joints, twist included.

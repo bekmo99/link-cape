@@ -138,15 +138,24 @@ static void refineCloth(Packet_c& pk) {
         }
         pk.mRefPos[(kRefRows - 1) * kRefCols + c] = tmp[(kRows - 1) * kRefCols + c];
     }
+    // Lighting normals from a wide stencil (one whole cell each way) so small wobbles in the cloth
+    // don't turn into dark and light bumps, then eased toward the direction his back faces over the
+    // pinned part, where the cloth is meant to be smooth.
     for (int r = 0; r < kRefRows; r++) {
         for (int c = 0; c < kRefCols; c++) {
-            const int r0 = r > 0 ? r - 1 : r;
-            const int r1 = r < kRefRows - 1 ? r + 1 : r;
-            const int c0 = c > 0 ? c - 1 : c;
-            const int c1 = c < kRefCols - 1 ? c + 1 : c;
+            const int r0 = std::max(r - kSub, 0);
+            const int r1 = std::min(r + kSub, kRefRows - 1);
+            const int c0 = std::max(c - kSub, 0);
+            const int c1 = std::min(c + kSub, kRefCols - 1);
             const V3 dx = pk.mRefPos[r * kRefCols + c1] - pk.mRefPos[r * kRefCols + c0];
             const V3 dy = pk.mRefPos[r1 * kRefCols + c] - pk.mRefPos[r0 * kRefCols + c];
-            pk.mRefNrm[r * kRefCols + c] = normalized(cross(dy, dx), V3{0.0f, 0.0f, -1.0f});
+            V3 n = normalized(cross(dy, dx), pk.mBack);
+            const f32 rowF = static_cast<f32>(r) / kSub;  // original row units
+            const f32 kPinnedRows = 5.0f;  // same as kRigid below
+            f32 kb = 1.0f - (rowF - kPinnedRows) / 1.5f;
+            kb = kb > 1.0f ? 1.0f : (kb < 0.0f ? 0.0f : kb);
+            kb *= 0.7f;
+            pk.mRefNrm[r * kRefCols + c] = normalized(n * (1.0f - kb) + pk.mBack * kb, pk.mBack);
         }
     }
 }
@@ -962,6 +971,7 @@ int Cape_c::Execute() {
         }
     }
     mPacket.mTickTime = nowSec;
+    mPacket.mBack = back;
     mPacket.mDrawsLastTick = mPacket.mDrawsThisTick;
     // Decide whether to blend between ticks from a smoothed draws-per-tick count, with hysteresis.
     // (Switching on a single tick's count made the cape flip between "ahead" and "behind" and bounce.)
@@ -981,6 +991,37 @@ int Cape_c::Execute() {
             mPacket.mPos[i] = smooth ? mPacket.mPos[i] + (mP[i] - mPacket.mPos[i]) *
                 (0.65f - 0.25f * static_cast<f32>(r - kRigid) / static_cast<f32>(kRows - 1 - kRigid)) : mP[i];
             mPacket.mNrm[i] = normalized(gridNormal(r, c) * sign, back);
+        }
+    }
+    // Smooth the lighting normals. Tiny wobbles in the cloth made them vary from point to point,
+    // which showed up as dark and light bumps that depend on which way he faces (the light is
+    // fixed in the world). Over the pinned part they follow his back direction closely.
+    {
+        V3 raw[kCount];
+        for (int pass = 0; pass < 2; pass++) {
+            for (int i = 0; i < kCount; i++) {
+                raw[i] = mPacket.mNrm[i];
+            }
+            for (int r = 0; r < kRows; r++) {
+                for (int c = 0; c < kCols; c++) {
+                    V3 sum = {0.0f, 0.0f, 0.0f};
+                    for (int dr = -1; dr <= 1; dr++) {
+                        for (int dc = -1; dc <= 1; dc++) {
+                            const int rr = std::min(std::max(r + dr, 0), kRows - 1);
+                            const int cc = std::min(std::max(c + dc, 0), kCols - 1);
+                            sum = sum + raw[rr * kCols + cc];
+                        }
+                    }
+                    mPacket.mNrm[r * kCols + c] = normalized(sum, back);
+                }
+            }
+        }
+        for (int r = 0; r <= kRigid + 1; r++) {
+            const f32 k = r <= kRigid ? 0.7f : 0.35f;
+            for (int c = 0; c < kCols; c++) {
+                V3& n = mPacket.mNrm[r * kCols + c];
+                n = normalized(n * (1.0f - k) + back * k, back);
+            }
         }
     }
     if (mPacket.mSnap) {

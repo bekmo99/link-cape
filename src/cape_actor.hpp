@@ -64,6 +64,7 @@ public:
     double mDrawEma = 1.0;       // average number of draws per tick
     bool mInterpOn = false;      // blend between ticks (only when the game draws more than once per tick)
     bool mSnap = true;           // next tick: don't interpolate from stale data
+    V3 mBack = {0.0f, 0.0f, -1.0f};  // direction away from his back (for the lighting normals)
 };
 
 class Cape_c : public fopAc_ac_c {

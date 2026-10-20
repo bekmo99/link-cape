@@ -187,8 +187,11 @@ for r in range(kRigid+1):
         p=np.array([x,y,ZB[r,c]])
         pts.append(p)
         # skin weights: average of the nearest body vertices' weights (chest / spine / waist)
-        d=np.linalg.norm(V-p,axis=1); nn=np.argsort(d)[:8]
-        wgt=VW[nn].mean(axis=0); wgt=wgt/wgt.sum()
+        # Smooth skin weights that depend only on height (chest above, waist below). Weights taken
+        # from the nearest body vertices varied from point to point, and the differences between
+        # the joint motions showed up as bumps across the upper back.
+        t=min(1.0,max(0.0,(124.0-y)/21.0)); t=t*t*(3-2*t)
+        wgt=np.array([1.0-t,0.0,t])
         rigid.append((to_local(2,p),to_local(1,p),to_local(16,p),wgt))
 pts=np.array(pts)
 

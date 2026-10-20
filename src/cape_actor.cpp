@@ -711,6 +711,61 @@ int Cape_c::Execute() {
             }
             rest[i] = base[i] + d;
         }
+
+        // Gear on his back (the sheath, mostly) sits just off his back where the cape is pinned, and
+        // in motion the cape drifted out over it. Ease the pinned rows (not the collar rows) in a
+        // little where gear is: a small push, spread smoothly over the neighbours so it can't make
+        // dents, and never more than a couple of units, so the cape stays close to him.
+        if (boxCount > 0) {
+            V3 pushField[kPinCount];
+            bool any = false;
+            for (int i = 0; i < kPinCount; i++) {
+                pushField[i] = {0.0f, 0.0f, 0.0f};
+                if (i / kCols < 2) {
+                    continue;
+                }
+                V3 q = rest[i];
+                V3 n;
+                for (int k = 0; k < boxCount; k++) {
+                    collideBoxInward(q, boxes[k], back, n);
+                }
+                V3 d = q - rest[i];
+                const f32 dl = length(d);
+                if (dl > 2.5f) {
+                    d = d * (2.5f / dl);
+                }
+                pushField[i] = d;
+                any = any || dl > 0.01f;
+            }
+            if (any) {
+                for (int pass = 0; pass < 2; pass++) {
+                    V3 tmpP[kPinCount];
+                    for (int r = 0; r <= kRigid; r++) {
+                        for (int c = 0; c < kCols; c++) {
+                            V3 sum = {0.0f, 0.0f, 0.0f};
+                            f32 wsum = 0.0f;
+                            for (int dr = -1; dr <= 1; dr++) {
+                                for (int dc = -1; dc <= 1; dc++) {
+                                    const int rr = r + dr;
+                                    const int cc = c + dc;
+                                    if (rr < 0 || rr > kRigid || cc < 0 || cc >= kCols) {
+                                        continue;
+                                    }
+                                    const f32 w = (dr == 0 ? 2.0f : 1.0f) * (dc == 0 ? 2.0f : 1.0f);
+                                    sum = sum + pushField[rr * kCols + cc] * w;
+                                    wsum += w;
+                                }
+                            }
+                            tmpP[r * kCols + c] = sum * (1.0f / wsum);
+                        }
+                    }
+                    std::memcpy(pushField, tmpP, sizeof(pushField));
+                }
+                for (int i = 2 * kCols; i < kPinCount; i++) {
+                    rest[i] = rest[i] + pushField[i];
+                }
+            }
+        }
         if (worst > 6.0f && gLogWarn != nullptr && mLogCooldown <= 0) {
             char msg[200];
             std::snprintf(msg, sizeof(msg),

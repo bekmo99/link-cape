@@ -941,15 +941,14 @@ int Cape_c::Execute() {
     }
     const bool swimMode = mSwimMode;
     if (swimMode) {
-        // The pinned part stays on his back (it follows his body however he is turned); below it the
-        // cape trails behind him. At the surface it lies flat on the water. When he dives it is
-        // slowly pulled down and relaxes behind him as it settles.
-        const f32 surf = link->mWaterY + 1.0f;
-        const f32 surfTarget = P[3].y > link->mWaterY - 15.0f ? 1.0f : 0.0f;
-        mSwimSurf += (surfTarget - mSwimSurf) * (surfTarget > mSwimSurf ? 0.15f : 0.05f);
-        const f32 s = mSwimSurf;
+        // The pinned part stays on his back (it follows his body however he is turned). Below it the
+        // cape drifts loosely out behind him under the water: almost weightless, heavily damped,
+        // swaying gently, and never coming up through the surface.
+        const f32 ceiling = link->mWaterY - 2.0f;
         const f32 seg = gTuning.length / static_cast<f32>(kRows - 1);
         const V3 aMid = rest[kRigid * kCols + kCols / 2];
+        const V3 side = {std::cos(angle), 0.0f, -std::sin(angle)};
+        mSwimTime += 1.0f;
         V3 T[kCount];
         for (int i = 0; i < (kRigid + 1) * kCols; i++) {
             mP[i] = rest[i];
@@ -958,30 +957,30 @@ int Cape_c::Execute() {
         }
         for (int r = kRigid + 1; r < kRows; r++) {
             const f32 k = static_cast<f32>(r - kRigid);
+            const f32 kT = k / static_cast<f32>(kRows - 1 - kRigid);
             for (int c = 0; c < kCols; c++) {
                 const V3 A = rest[kRigid * kCols + c];
-                V3 t = A + (A - aMid) * (0.02f * k) + back * (seg * k);
-                const f32 hangY = A.y - seg * k * 0.45f;
-                t.y = std::min(surf * s + hangY * (1.0f - s), surf);
+                const f32 phase = mSwimTime * 0.07f + static_cast<f32>(c) * 0.45f - k * 0.6f;
+                const f32 sway = std::sin(phase) * 2.5f * kT;
+                const f32 bob = std::sin(phase * 0.8f + 1.3f) * 2.0f * kT;
+                V3 t = A + (A - aMid) * (0.03f * k) + back * (seg * k * 0.95f) + side * sway;
+                t.y = A.y - seg * k * 0.12f + bob;
                 T[r * kCols + c] = t;
             }
         }
         for (int r = kRigid + 1; r < kRows; r++) {
             for (int c = 0; c < kCols; c++) {
                 const int i = r * kCols + c;
-                V3 vel = (mP[i] - mPrev[i]) * 0.80f;
+                V3 vel = (mP[i] - mPrev[i]) * 0.86f;
                 const f32 sp = length(vel);
                 if (sp > kMaxSpeed) {
                     vel = vel * (kMaxSpeed / sp);
                 }
                 mPrev[i] = mP[i];
-                mP[i] = mP[i] + vel + V3{0.0f, -0.10f * (1.0f - s), 0.0f};
-                mP[i] = mP[i] + (T[i] - mP[i]) * 0.10f;
-                if (s > 0.5f) {
-                    mP[i].y = mP[i].y + (surf - mP[i].y) * 0.4f * s;
-                }
-                if (mP[i].y > surf) {
-                    mP[i].y = surf;
+                mP[i] = mP[i] + vel + V3{0.0f, -0.03f, 0.0f};
+                mP[i] = mP[i] + (T[i] - mP[i]) * 0.06f;
+                if (mP[i].y > ceiling) {
+                    mP[i].y = ceiling;
                 }
             }
         }

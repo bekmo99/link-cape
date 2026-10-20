@@ -869,21 +869,15 @@ int Cape_c::Execute() {
                          (kRows - 1 - kRigid);
     const f32 groundY = link->current.pos.y + 2.0f;
     const V3 mid = rest[kRigid * kCols + kCols / 2];
-    // The pinned part follows the lean of his back (leaning forward running, it slopes backward
-    // going down). Hanging the cloth straight down from the belt made a sharp bend there, so the
-    // slope is carried on below the belt and eased out over the next few rows: one smooth curve.
-    f32 leanOff[kRows] = {};
+    // Angle (from straight down, toward his back) at which the pinned part of the cape leaves the
+    // belt: leaning forward running, his back slopes backward going down. The cloth below carries on
+    // from that angle (see the flare curve below) so there is no corner at the belt.
+    f32 theta0 = 0.0f;
     {
         const V3 dPin = normalized(rest[kRigid * kCols + kCols / 2] - rest[(kRigid - 1) * kCols + kCols / 2], up * -1.0f);
         const f32 downPart = -dot(dPin, up);
-        f32 slope = dot(dPin, back) / (downPart > 0.3f ? downPart : 0.3f);
-        slope = slope < -0.3f ? -0.3f : (slope > 1.0f ? 1.0f : slope);
-        for (int r = kRigid + 1; r < kRows; r++) {
-            const f32 j = static_cast<f32>(r - kRigid);
-            f32 e = 1.0f - (j - 0.5f) / 5.0f;
-            e = e < 0.0f ? 0.0f : e;
-            leanOff[r] = leanOff[r - 1] + vRestLow * slope * e * std::sqrt(e);
-        }
+        theta0 = std::atan2(dot(dPin, back), downPart > 0.05f ? downPart : 0.05f);
+        theta0 = theta0 < -0.3f ? -0.3f : (theta0 > 0.9f ? 0.9f : theta0);
     }
     for (int r = kRigid + 1; r < kRows; r++) {
         const f32 k = static_cast<f32>(r - kRigid);
@@ -897,7 +891,7 @@ int Cape_c::Execute() {
         for (int c = 0; c < kCols; c++) {
             const V3& h = rest[kRigid * kCols + c];
             const f32 depth = kEnvDepth[y0][c] * (1.0f - fy) + kEnvDepth[y0 + 1][c] * fy;
-            V3 p = h + (h - mid) * (widen - 1.0f) + up * (-vRestLow * k) + back * (depth + leanOff[r]);
+            V3 p = h + (h - mid) * (widen - 1.0f) + up * (-vRestLow * k) + back * depth;
             resolveBody(p, 2);
             if (p.y < groundY) {
                 p.y = groundY;
@@ -934,11 +928,23 @@ int Cape_c::Execute() {
     const f32 flare = std::min(1.0f, mStream / (kRunStream * 12.0f));
     V3 target[kCount];
     {
+        // One smooth curve: the angle from vertical grows steadily from the angle his back has at
+        // the belt to nearly horizontal at the hem (more the faster he runs), so the cape sweeps
+        // back and down in a single arc, flattening out toward the end. Standing, the lean fades
+        // out over the first rows and the cape just hangs.
+        constexpr f32 kEndAngle = 1.45f;  // about 83 degrees from vertical at full speed
         f32 offBack[kRows] = {};
         f32 offUp[kRows] = {};
         for (int r = kRigid + 1; r < kRows; r++) {
-            const f32 rowT = static_cast<f32>(r - kRigid) / (kRows - 1 - kRigid);
-            const f32 theta = flare * 1.15f * std::pow(rowT, 1.2f);
+            const f32 u = static_cast<f32>(r - kRigid) / (kRows - 1 - kRigid);
+            f32 e = u / 0.75f;
+            e = e > 1.0f ? 1.0f : e;
+            e = e * e * (3.0f - 2.0f * e);
+            f32 fade = 1.0f - (static_cast<f32>(r - kRigid) - 0.5f) / 5.0f;
+            fade = fade < 0.0f ? 0.0f : fade;
+            const f32 thetaStill = theta0 * fade * std::sqrt(fade);
+            const f32 thetaRun = theta0 + (kEndAngle - theta0) * e;
+            const f32 theta = thetaStill * (1.0f - flare) + thetaRun * flare;
             offBack[r] = offBack[r - 1] + vRestLow * std::sin(theta);
             offUp[r] = offUp[r - 1] + vRestLow * (1.0f - std::cos(theta));
         }
@@ -949,7 +955,6 @@ int Cape_c::Execute() {
             }
         }
     }
-
     for (int i = 0; i < (kRigid + 1) * kCols; i++) {
         mP[i] = rest[i];
         mPrev[i] = rest[i];
@@ -1009,7 +1014,7 @@ int Cape_c::Execute() {
                 // Hanging cloth never rises above the row it hangs from: no floating up while he
                 // runs or when the legs kick it.
                 {
-                    const f32 maxY = mP[(r - 1) * kCols + c].y - 0.35f * vRestLow;
+                    const f32 maxY = mP[(r - 1) * kCols + c].y - 0.04f * vRestLow;
                     if (p.y > maxY) {
                         p.y = maxY;
                     }

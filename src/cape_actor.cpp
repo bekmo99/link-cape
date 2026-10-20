@@ -253,7 +253,7 @@ constexpr f32 kDrag = 0.12f;        // fraction of velocity lost per tick
 constexpr f32 kGravity = 0.9f;      // units per tick^2
 constexpr f32 kRunStream = 0.007f;  // extra backward push per unit of Link's forward speed
 constexpr f32 kWiden = 0.20f;       // how much wider the hem is than the hips
-constexpr f32 kMaxSkinDrift = 9.0f;  // how far the skinned pinned points may stray from the simple estimate
+constexpr f32 kMaxSkinDrift = 5.0f;  // how far the skinned pinned points may stray from the simple estimate
 constexpr f32 kSkin = 1.0f;         // the cloth rides this far outside the body
 
 static void solveDistance(V3& a, V3& b, f32 rest, bool pinA, bool pinB) {
@@ -602,9 +602,9 @@ int Cape_c::Execute() {
     }
     Box boxes[kMaxBoxes];
     int boxCount = 0;
-    // Gear collision is off: the shield / sheath boxes made the cloth behind them warp. The cape
+    // Gear collision: keeps the cloth against his back under the shield / sheath. (Switching it off made the cape lift away from him in motion.) The cape
     // just hangs close to his back and follows him instead.
-    constexpr bool kGearCollision = false;
+    constexpr bool kGearCollision = true;
     for (int i = 0; kGearCollision && i < allCount; i++) {
         const Box& b = allBoxes[i];
         V3 mid = b.origin;
@@ -663,7 +663,7 @@ int Cape_c::Execute() {
                 rest[r * kCols + c] = skinned;
             }
         }
-        if (worst > 14.0f && gLogWarn != nullptr && mLogCooldown <= 0) {
+        if (worst > 6.0f && gLogWarn != nullptr && mLogCooldown <= 0) {
             char msg[200];
             std::snprintf(msg, sizeof(msg),
                 "pinned cape point %.1f units from the spine estimate (handed=%.0f, axes valid %d%d%d, "

@@ -35,6 +35,9 @@ struct Tuning {
 };
 extern Tuning gTuning;
 
+// Set by mod.cpp so the actor can write to the game's log.
+extern void (*gLogWarn)(const char* msg);
+
 // What the GX pipeline draws: world-space positions and normals, copied from the sim each tick.
 class Packet_c : public J3DPacket {
 public:
@@ -89,6 +92,7 @@ private:
     f32 mStream = 0.0f;  // smoothed run-speed push
     V3 mSphereSm[180];   // body collision spheres, smoothed over time (kBodySphereCount)
     bool mSphereInit = false;
+    int mLogCooldown = 0;
     // Which column of the spine / chest / waist joint matrices is "side" and "up", worked out once
     // while he stands still (index 0 = spine, 1 = chest, 2 = waist). Lets the pinned top follow the
     // real orientation of those joints, twist included.

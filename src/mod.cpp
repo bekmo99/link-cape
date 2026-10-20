@@ -150,6 +150,8 @@ static void ensureCape() {
     sSpawnCooldown = 60;
 }
 
+static void logWarn(const char* msg) { svc_log->warn(mod_ctx, msg); }
+
 extern "C" {
 MOD_EXPORT ModResult mod_initialize(ModError*) {
     if (registerBool("show_cape", true, &sShowVar) != MOD_OK ||
@@ -161,6 +163,7 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         svc_log->error(mod_ctx, "failed to register config vars");
         return MOD_ERROR;
     }
+    lnkcape::gLogWarn = logWarn;
     refreshTuning();
 
     UiModsPanelDesc panel = UI_MODS_PANEL_DESC_INIT;

@@ -11,11 +11,13 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace lnkcape {
 
 Tuning gTuning;
+void (*gLogWarn)(const char* msg) = nullptr;
 
 s16 Cape_c::sProcName = -1;
 ActorHandle Cape_c::sActorHandle = -1;
@@ -250,6 +252,7 @@ constexpr f32 kDrag = 0.12f;        // fraction of velocity lost per tick
 constexpr f32 kGravity = 0.9f;      // units per tick^2
 constexpr f32 kRunStream = 0.007f;  // extra backward push per unit of Link's forward speed
 constexpr f32 kWiden = 0.20f;       // how much wider the hem is than the hips
+constexpr f32 kMaxSkinDrift = 9.0f;  // how far the skinned pinned points may stray from the simple estimate
 constexpr f32 kSkin = 1.0f;         // the cloth rides this far outside the body
 
 static void solveDistance(V3& a, V3& b, f32 rest, bool pinA, bool pinB) {
@@ -610,13 +613,49 @@ int Cape_c::Execute() {
 
     // --- Rigid part: carried by the chest and waist ------------------------------------------
     V3 rest[kCount];
-    for (int r = 0; r <= kRigid; r++) {
-        for (int c = 0; c < kCols; c++) {
-            const RigidPoint& rp = kRigidPoints[r * kCols + c];
-            // Linear blend skinning with the chest, spine and waist, like the body mesh itself.
-            rest[r * kCols + c] = fromLocal(P[2], fr[0], rp.chest) * rp.w[0] +
-                                  fromLocal(P[1], fr[1], rp.spine) * rp.w[1] +
-                                  fromLocal(P[16], fr[2], rp.waist) * rp.w[2];
+    {
+        // A second, simple estimate of where each pinned point should be, that cannot go badly
+        // wrong: along the spine's own line, then sideways / backward by his yaw. The skinned
+        // position (which follows the real joint rotations) is trusted only within a few units of
+        // it, so a mis-measured joint axis can never throw part of the cape out into a spike.
+        const V3 side = {std::cos(angle), 0.0f, -std::sin(angle)};
+        const V3 dirChest = normalized(P[3] - P[2], up);
+        const V3 dirWaist = normalized(P[2] - P[16], up);
+        f32 worst = 0.0f;
+        for (int r = 0; r <= kRigid; r++) {
+            for (int c = 0; c < kCols; c++) {
+                const RigidPoint& rp = kRigidPoints[r * kCols + c];
+                const f32 yb = rp.chest[1] + 124.0f;  // bind height (chest local = bind - chest origin)
+                const V3 axisPoint = yb >= 124.0f ? P[2] + dirChest * (yb - 124.0f)
+                                                  : P[16] + dirWaist * (yb - 103.0f);
+                const V3 safe = axisPoint + side * rp.chest[0] + forward * rp.chest[2];
+                // Linear blend skinning with the chest, spine and waist, like the body mesh itself.
+                V3 skinned = fromLocal(P[2], fr[0], rp.chest) * rp.w[0] +
+                             fromLocal(P[1], fr[1], rp.spine) * rp.w[1] +
+                             fromLocal(P[16], fr[2], rp.waist) * rp.w[2];
+                const V3 diff = skinned - safe;
+                const f32 dl = length(diff);
+                if (dl > worst) {
+                    worst = dl;
+                }
+                if (dl > kMaxSkinDrift) {
+                    skinned = safe + diff * (kMaxSkinDrift / dl);
+                }
+                rest[r * kCols + c] = skinned;
+            }
+        }
+        if (worst > 14.0f && gLogWarn != nullptr && mLogCooldown <= 0) {
+            char msg[200];
+            std::snprintf(msg, sizeof(msg),
+                "pinned cape point %.1f units from the spine estimate (handed=%.0f, axes valid %d%d%d, "
+                "up %d%d%d, side %d%d%d); clamped",
+                static_cast<double>(worst), static_cast<double>(handed), mAxValid[0], mAxValid[1],
+                mAxValid[2], mAxUp[0], mAxUp[1], mAxUp[2], mAxSide[0], mAxSide[1], mAxSide[2]);
+            gLogWarn(msg);
+            mLogCooldown = 300;
+        }
+        if (mLogCooldown > 0) {
+            mLogCooldown--;
         }
     }
 

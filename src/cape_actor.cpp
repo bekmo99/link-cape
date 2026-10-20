@@ -573,8 +573,6 @@ cPhs_Step Cape_c::create() {
 }
 
 int Cape_c::Delete() {
-    mPacket.mVisible = false;  // a stale replay of the draw list must do nothing
-    mPacket.mAttachValid = false;
     if (sInstance == this) {
         sInstance = nullptr;
     }
@@ -1289,23 +1287,6 @@ int Cape_c::Execute() {
             mPacket.mNrm[i] = normalized(gridNormal(r, c) * sign, back);
         }
     }
-    // Anything non-finite (a half-built pose during respawn, say) must never reach the renderer.
-    {
-        bool bad = false;
-        for (int i = 0; i < kCount && !bad; i++) {
-            const V3& q = mP[i];
-            bad = !(std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z)) ||
-                  std::fabs(q.x) > 1.0e6f || std::fabs(q.y) > 1.0e6f || std::fabs(q.z) > 1.0e6f;
-        }
-        if (bad) {
-            mPacket.mVisible = false;
-            mSimInit = false;
-            mSphereInit = false;
-            mPacket.mAttachValid = false;
-            return 1;
-        }
-    }
-
     // Store the pinned rows relative to his chest and waist joints (see Packet_c::draw).
     {
         MtxP mc = link->mpLinkModel->getAnmMtx(2);

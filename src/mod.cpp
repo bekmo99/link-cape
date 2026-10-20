@@ -5,7 +5,6 @@
 #include "mods/svc/ui.h"
 
 // Game includes
-#include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_actor_mng.h"
 
@@ -120,9 +119,6 @@ static int sSpawnCooldown = 0;
 
 // Link is recreated on every stage load, and the cape deletes itself when its parent goes away, so
 // all we need to do is make sure there is one whenever Link exists.
-static u32 sLastPlayerId = 0xFFFFFFFF;
-static int sPlayerAge = 0;
-
 static void ensureCape() {
     if (Cape_c::sInstance != nullptr) {
         // A cape whose Link is gone (death, game over, stage change) must not linger.
@@ -138,22 +134,6 @@ static void ensureCape() {
     }
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     if (player == nullptr || fopAcM_GetName(player) != fpcNm_ALINK_e) {
-        sPlayerAge = 0;
-        return;
-    }
-    // Give a freshly created Link time to finish setting up (respawn / stage load: he is still
-    // lying down or being built, and his model and joints are not ready). Spawning the cape against
-    // a half-built Link crashed the game as he stood up.
-    if (fopAcM_GetID(player) != sLastPlayerId) {
-        sLastPlayerId = fopAcM_GetID(player);
-        sPlayerAge = 0;
-    }
-    sPlayerAge++;
-    daAlink_c* alink = static_cast<daAlink_c*>(player);
-    if (sPlayerAge < 120 || alink->mpLinkModel == nullptr ||
-        alink->mpLinkModel->getModelData() == nullptr ||
-        alink->mpLinkModel->getModelData()->getJointNum() < 35)
-    {
         return;
     }
 

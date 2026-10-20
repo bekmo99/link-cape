@@ -602,7 +602,10 @@ int Cape_c::Execute() {
     }
     Box boxes[kMaxBoxes];
     int boxCount = 0;
-    for (int i = 0; i < allCount; i++) {
+    // Gear collision is off: the shield / sheath boxes made the cloth behind them warp. The cape
+    // just hangs close to his back and follows him instead.
+    constexpr bool kGearCollision = false;
+    for (int i = 0; kGearCollision && i < allCount; i++) {
         const Box& b = allBoxes[i];
         V3 mid = b.origin;
         for (int k = 0; k < 3; k++) {
@@ -906,7 +909,7 @@ int Cape_c::Execute() {
             }
             const V3& above = mP[i - kCols];
             const V3 v = p - above;
-            const f32 maxLen = length(rest[i] - rest[i - kCols]) * 1.015f;
+            const f32 maxLen = length(rest[i] - rest[i - kCols]) * 1.003f;
             const f32 vl = length(v);
             if (vl > maxLen) {
                 p = above + v * (maxLen / vl);

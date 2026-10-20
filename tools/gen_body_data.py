@@ -166,7 +166,7 @@ for r in range(kRigid+1):
                 if z is not None: zs.append(z)
         z=min(zs) if zs else -10.0
         z=max(-13.0,min(-3.0,z))
-        ZB[r,c]=z+[+3.0,+1.8,+0.8,0.0,-0.8,-0.8][r]
+        ZB[r,c]=z+[+3.0,+1.8,+0.8,-0.2,-1.2,-2.4][r]
 for c in range(kCols):
     z2=ZB[2,c]; z5=min(ZB[5,c],z2)
     for r in range(3,kRigid+1):

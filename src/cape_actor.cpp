@@ -413,7 +413,22 @@ static bool collideBoxInward(V3& p, const Box& b, const V3& back, V3& nOut) {
     const f32 s = b.scale[bestK] > 1e-4f ? b.scale[bestK] : 1.0f;
     const f32 dist = (bestDir > 0.0f ? hi[bestK] - l[bestK] : l[bestK] - lo[bestK]) * s;
     nOut = b.axis[bestK] * bestDir;
-    p = p + nOut * (dist + 0.5f);
+    // Fade the push in over a few units from the box's other faces, so cloth near the edge of a
+    // shield / sheath is eased aside instead of jumping to the far side (that made it warp).
+    f32 edge = 1e30f;
+    for (int k = 0; k < 3; k++) {
+        if (k == bestK) {
+            continue;
+        }
+        const f32 sk = b.scale[k] > 1e-4f ? b.scale[k] : 1.0f;
+        edge = std::min(edge, std::min(l[k] - lo[k], hi[k] - l[k]) * sk);
+    }
+    f32 w = std::min(1.0f, edge / 4.0f);
+    w = w * w * (3.0f - 2.0f * w);
+    if (w < 0.02f) {
+        return false;
+    }
+    p = p + nOut * ((dist + 0.5f) * w);
     return true;
 }
 
@@ -568,7 +583,7 @@ int Cape_c::Execute() {
         if (!mSphereInit) {
             mSphereSm[i] = target;
         } else {
-            mSphereSm[i] = mSphereSm[i] + (target - mSphereSm[i]) * 0.6f;
+            mSphereSm[i] = mSphereSm[i] + (target - mSphereSm[i]) * 0.4f;
         }
         spheres[i].c = mSphereSm[i];
         spheres[i].r = b.r + kSkin;
@@ -753,7 +768,7 @@ int Cape_c::Execute() {
             // The hem is looser than the top of the hanging part: it is pulled back to the resting
             // shape less and streams out more, so the bottom flows.
             const f32 loose = rowT * rowT;
-            const f32 gravity = kGravity * (1.0f - flare * 0.85f * std::pow(rowT, 0.8f));
+            const f32 gravity = kGravity * (1.0f - flare * 0.95f * std::pow(rowT, 0.6f));
             p = p + vel + V3{0.0f, -gravity, 0.0f} + back * (stream * (0.3f + 1.2f * loose));
             p = p + (target[i] - p) * (spring * (1.0f - 0.85f * loose) + flare * 0.05f * loose);
         }
@@ -843,7 +858,7 @@ int Cape_c::Execute() {
     // out of the body once more so the smoothing can't sink it in.
     {
         V3 dev[kCount];
-        for (int pass = 0; pass < 3; pass++) {
+        for (int pass = 0; pass < 4; pass++) {
             for (int r = kRigid + 1; r < kRows; r++) {
                 for (int c = 0; c < kCols; c++) {
                     const int i = r * kCols + c;
@@ -891,7 +906,7 @@ int Cape_c::Execute() {
             }
             const V3& above = mP[i - kCols];
             const V3 v = p - above;
-            const f32 maxLen = length(rest[i] - rest[i - kCols]) * 1.04f;
+            const f32 maxLen = length(rest[i] - rest[i - kCols]) * 1.015f;
             const f32 vl = length(v);
             if (vl > maxLen) {
                 p = above + v * (maxLen / vl);
@@ -944,7 +959,8 @@ int Cape_c::Execute() {
             const int i = r * kCols + c;
             // Light smoothing of what is drawn, for the hanging part only.
             const bool smooth = r > kRigid && !mPacket.mSnap;
-            mPacket.mPos[i] = smooth ? mPacket.mPos[i] + (mP[i] - mPacket.mPos[i]) * 0.65f : mP[i];
+            mPacket.mPos[i] = smooth ? mPacket.mPos[i] + (mP[i] - mPacket.mPos[i]) *
+                (0.65f - 0.25f * static_cast<f32>(r - kRigid) / static_cast<f32>(kRows - 1 - kRigid)) : mP[i];
             mPacket.mNrm[i] = normalized(gridNormal(r, c) * sign, back);
         }
     }

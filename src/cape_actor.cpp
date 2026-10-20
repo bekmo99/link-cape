@@ -693,7 +693,11 @@ int Cape_c::Execute() {
                             if (rr < 0 || rr > kRigid || cc < 0 || cc >= kCols) {
                                 continue;
                             }
-                            const f32 w = (dr == 0 ? 2.0f : 1.0f) * (dc == 0 ? 2.0f : 1.0f);
+                            // The top rows are barely averaged with the rows below: those lean
+                            // less than the shoulders, and averaging them in made the top of the
+                            // cape lag behind his shoulders when he leans forward running.
+                            const f32 vw = r == 0 ? 0.0f : (r == 1 ? 0.4f : 1.0f);
+                            const f32 w = (dr == 0 ? 2.0f : vw) * (dc == 0 ? 2.0f : 1.0f);
                             sum = sum + diff[rr * kCols + cc] * w;
                             wsum += w;
                         }

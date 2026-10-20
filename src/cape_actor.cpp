@@ -41,11 +41,13 @@ static inline V3 normalized(const V3& a, const V3& fallback) {
     return l > 1e-4f ? a * (1.0f / l) : fallback;
 }
 
+}  // namespace lnkcape
 namespace dusk::interp {
 // The game's frame interpolation. Replaces a matrix (keyed by its address, e.g. a joint matrix
 // of a model) with the one for the frame being presented; false when nothing replaces it.
 bool lookup_replacement(const void* key, Mtx out);
-}
+}  // namespace dusk::interp
+namespace lnkcape {
 
 static V3 applyMtx(const f32 m[3][4], const V3& p) {
     return {m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3],
@@ -215,7 +217,7 @@ void Packet_c::draw() {
         Mtx presented[2];
         const f32 (*jm[2])[4] = {mJointMtx[0], mJointMtx[1]};
         for (int k = 0; k < 2; k++) {
-            if (dusk::interp::lookup_replacement(mJointMtx[k], presented[k])) {
+            if (::dusk::interp::lookup_replacement(mJointMtx[k], presented[k])) {
                 jm[k] = presented[k];
             }
         }

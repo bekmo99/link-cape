@@ -10,6 +10,7 @@
 #include "JSystem/J3DGraphBase/J3DShape.h"
 
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -704,6 +705,30 @@ int Cape_c::Execute() {
     const f32 stream = mStream;
     const f32 spring = 0.003f * gTuning.stiffness;
 
+    // --- Flare while running ---------------------------------------------------------------------
+    // Running, the air carries the cape out behind him in a smooth arc: straight down at the top of
+    // the hanging part, curving gradually back toward the hem. The cloth is drawn toward this
+    // curve ("target") instead of toward a plain vertical hang, and gravity is partly held off by
+    // the same amount, so it streams out instead of folding down at a sharp bend.
+    const f32 flare = std::min(1.0f, mStream / (kRunStream * 16.0f));
+    V3 target[kCount];
+    {
+        f32 offBack[kRows] = {};
+        f32 offUp[kRows] = {};
+        for (int r = kRigid + 1; r < kRows; r++) {
+            const f32 rowT = static_cast<f32>(r - kRigid) / (kRows - 1 - kRigid);
+            const f32 theta = flare * 0.95f * std::pow(rowT, 1.3f);
+            offBack[r] = offBack[r - 1] + vRestLow * std::sin(theta);
+            offUp[r] = offUp[r - 1] + vRestLow * (1.0f - std::cos(theta));
+        }
+        for (int r = 0; r < kRows; r++) {
+            for (int c = 0; c < kCols; c++) {
+                const int i = r * kCols + c;
+                target[i] = rest[i] + back * offBack[r] + up * offUp[r];
+            }
+        }
+    }
+
     for (int i = 0; i < (kRigid + 1) * kCols; i++) {
         mP[i] = rest[i];
         mPrev[i] = rest[i];
@@ -723,8 +748,9 @@ int Cape_c::Execute() {
             // The hem is looser than the top of the hanging part: it is pulled back to the resting
             // shape less and streams out more, so the bottom flows.
             const f32 loose = rowT * rowT;
-            p = p + vel + V3{0.0f, -kGravity, 0.0f} + back * (stream * (0.3f + 1.2f * loose));
-            p = p + (rest[i] - p) * (spring * (1.0f - 0.85f * loose));
+            const f32 gravity = kGravity * (1.0f - flare * 0.85f * std::pow(rowT, 0.8f));
+            p = p + vel + V3{0.0f, -gravity, 0.0f} + back * (stream * (0.3f + 1.2f * loose));
+            p = p + (target[i] - p) * (spring * (1.0f - 0.85f * loose));
         }
     }
 
@@ -812,11 +838,11 @@ int Cape_c::Execute() {
     // out of the body once more so the smoothing can't sink it in.
     {
         V3 dev[kCount];
-        for (int pass = 0; pass < 2; pass++) {
+        for (int pass = 0; pass < 3; pass++) {
             for (int r = kRigid + 1; r < kRows; r++) {
                 for (int c = 0; c < kCols; c++) {
                     const int i = r * kCols + c;
-                    dev[i] = mP[i] - rest[i];
+                    dev[i] = mP[i] - target[i];
                 }
             }
             for (int r = kRigid + 1; r < kRows; r++) {
@@ -826,8 +852,8 @@ int Cape_c::Execute() {
                     const V3& rr = dev[r * kCols + (c < kCols - 1 ? c + 1 : c)];
                     const V3& u = dev[(r > kRigid + 1 ? r - 1 : r) * kCols + c];
                     const V3& d = dev[(r < kRows - 1 ? r + 1 : r) * kCols + c];
-                    const V3 avg = (l + rr + u + d) * 0.25f;
-                    mP[i] = rest[i] + dev[i] * 0.5f + avg * 0.5f;
+                    const V3 avg = (l + rr) * 0.3f + (u + d) * 0.2f;
+                    mP[i] = target[i] + dev[i] * 0.5f + avg * 0.5f;
                 }
             }
         }
@@ -849,14 +875,14 @@ int Cape_c::Execute() {
     // hem), and a hard limit on stretching, so quick moves can't distort or stretch it.
     for (int r = kRigid + 1; r < kRows; r++) {
         const f32 rowT = static_cast<f32>(r - kRigid) / (kRows - 1 - kRigid);
-        const f32 maxDev = 5.0f + 22.0f * rowT * rowT;
+        const f32 maxDev = (5.0f + 22.0f * rowT * rowT) * (1.0f + 0.4f * flare);
         for (int c = 0; c < kCols; c++) {
             const int i = r * kCols + c;
             V3& p = mP[i];
-            const V3 d = p - rest[i];
+            const V3 d = p - target[i];
             const f32 dl = length(d);
             if (dl > maxDev) {
-                p = rest[i] + d * (maxDev / dl);
+                p = target[i] + d * (maxDev / dl);
             }
             const V3& above = mP[i - kCols];
             const V3 v = p - above;

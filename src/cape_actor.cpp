@@ -941,45 +941,70 @@ int Cape_c::Execute() {
     }
     const bool swimMode = mSwimMode;
     if (swimMode) {
+        // The pinned part stays on his back (it follows his body however he is turned); below it the
+        // cape trails behind him. At the surface it lies flat on the water. When he dives it is
+        // slowly pulled down and relaxes behind him as it settles.
         const f32 surf = link->mWaterY + 1.0f;
-        const V3 side = {std::cos(angle), 0.0f, -std::sin(angle)};
-        const V3 O = {P[3].x + back.x * 6.0f, surf, P[3].z + back.z * 6.0f};
-        const f32 seg = gTuning.length / static_cast<f32>(kRows - 1) * 0.85f;
+        const f32 surfTarget = P[3].y > link->mWaterY - 15.0f ? 1.0f : 0.0f;
+        mSwimSurf += (surfTarget - mSwimSurf) * (surfTarget > mSwimSurf ? 0.15f : 0.05f);
+        const f32 s = mSwimSurf;
+        const f32 seg = gTuning.length / static_cast<f32>(kRows - 1);
+        const V3 aMid = rest[kRigid * kCols + kCols / 2];
         V3 T[kCount];
-        for (int r = 0; r < kRows; r++) {
-            const f32 hw = 16.0f + 6.0f * static_cast<f32>(r) / static_cast<f32>(kRows - 1);
+        for (int i = 0; i < (kRigid + 1) * kCols; i++) {
+            mP[i] = rest[i];
+            mPrev[i] = rest[i];
+            T[i] = rest[i];
+        }
+        for (int r = kRigid + 1; r < kRows; r++) {
+            const f32 k = static_cast<f32>(r - kRigid);
             for (int c = 0; c < kCols; c++) {
-                const f32 x = (1.0f - 2.0f * static_cast<f32>(c) / (kCols - 1)) * hw;
-                T[r * kCols + c] = O + side * x + back * (seg * static_cast<f32>(r));
+                const V3 A = rest[kRigid * kCols + c];
+                V3 t = A + (A - aMid) * (0.02f * k) + back * (seg * k);
+                const f32 hangY = A.y - seg * k * 0.45f;
+                t.y = std::min(surf * s + hangY * (1.0f - s), surf);
+                T[r * kCols + c] = t;
             }
         }
-        for (int i = 0; i < kCount; i++) {
-            const int r = i / kCols;
-            V3 vel = (mP[i] - mPrev[i]) * 0.78f;
-            const f32 sp = length(vel);
-            if (sp > kMaxSpeed) {
-                vel = vel * (kMaxSpeed / sp);
+        for (int r = kRigid + 1; r < kRows; r++) {
+            for (int c = 0; c < kCols; c++) {
+                const int i = r * kCols + c;
+                V3 vel = (mP[i] - mPrev[i]) * 0.80f;
+                const f32 sp = length(vel);
+                if (sp > kMaxSpeed) {
+                    vel = vel * (kMaxSpeed / sp);
+                }
+                mPrev[i] = mP[i];
+                mP[i] = mP[i] + vel + V3{0.0f, -0.10f * (1.0f - s), 0.0f};
+                mP[i] = mP[i] + (T[i] - mP[i]) * 0.10f;
+                if (s > 0.5f) {
+                    mP[i].y = mP[i].y + (surf - mP[i].y) * 0.4f * s;
+                }
+                if (mP[i].y > surf) {
+                    mP[i].y = surf;
+                }
             }
-            mPrev[i] = mP[i];
-            const f32 k = r == 0 ? 0.35f : 0.12f;
-            mP[i] = mP[i] + vel;
-            mP[i] = mP[i] + (T[i] - mP[i]) * k;
-            mP[i].y = mP[i].y + (surf - mP[i].y) * 0.5f;
         }
-        for (int it = 0; it < 4; it++) {
-            for (int r = 0; r < kRows; r++) {
+        for (int it = 0; it < 6; it++) {
+            for (int i = 0; i < (kRigid + 1) * kCols; i++) {
+                mP[i] = rest[i];
+            }
+            for (int r = kRigid; r < kRows; r++) {
                 for (int c = 0; c < kCols; c++) {
                     const int i = r * kCols + c;
+                    const bool pinned = r <= kRigid;
                     if (r + 1 < kRows) {
-                        solveDistance(mP[i], mP[i + kCols], length(T[i + kCols] - T[i]) * 1.02f, false, false);
+                        solveDistance(mP[i], mP[i + kCols], seg, pinned, false);
                     }
-                    if (c + 1 < kCols) {
-                        solveDistance(mP[i], mP[i + 1], length(T[i + 1] - T[i]) * 1.02f, false, false);
+                    if (r > kRigid && c + 1 < kCols) {
+                        solveDistance(mP[i], mP[i + 1], length(T[i + 1] - T[i]), false, false);
                     }
                 }
             }
         }
-        mPacket.mAttachValid = false;
+        for (int i = 0; i < (kRigid + 1) * kCols; i++) {
+            mP[i] = rest[i];
+        }
     }
     if (!swimMode) {
     // --- Integrate the hanging part ----------------------------------------------------------
@@ -1261,7 +1286,7 @@ int Cape_c::Execute() {
             }
             mPacket.mJointMtx[0] = mc;
             mPacket.mJointMtx[1] = mw;
-            mPacket.mAttachValid = !swimMode;
+            mPacket.mAttachValid = true;
         }
     }
     if (mPacket.mSnap) {

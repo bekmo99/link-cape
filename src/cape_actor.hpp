@@ -105,6 +105,7 @@ private:
     bool mSphereInit = false;
     int mLogCooldown = 0;
     int mSwimTicks = 0;      // debounce counter for the in-water state
+    f32 mSwimSurf = 1.0f;    // 1 = floating at the surface, 0 = fully submerged
     bool mSwimMode = false;  // in water: the whole cape is released and floats on the surface
     // Which column of the spine / chest / waist joint matrices is "side" and "up", worked out once
     // while he stands still (index 0 = spine, 1 = chest, 2 = waist). Lets the pinned top follow the

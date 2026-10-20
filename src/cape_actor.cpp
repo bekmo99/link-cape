@@ -41,6 +41,43 @@ static inline V3 normalized(const V3& a, const V3& fallback) {
     return l > 1e-4f ? a * (1.0f / l) : fallback;
 }
 
+namespace dusk::interp {
+// The game's frame interpolation. Replaces a matrix (keyed by its address, e.g. a joint matrix
+// of a model) with the one for the frame being presented; false when nothing replaces it.
+bool lookup_replacement(const void* key, Mtx out);
+}
+
+static V3 applyMtx(const f32 m[3][4], const V3& p) {
+    return {m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3],
+            m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3],
+            m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3]};
+}
+
+// Inverse of a 3x4 affine matrix (any scale). False if it can't be inverted.
+static bool invertAffine(const f32 m[3][4], f32 out[3][4]) {
+    const f32 a = m[0][0], b = m[0][1], c = m[0][2];
+    const f32 d = m[1][0], e = m[1][1], f = m[1][2];
+    const f32 g = m[2][0], h = m[2][1], i = m[2][2];
+    const f32 det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    if (std::fabs(det) < 1e-8f) {
+        return false;
+    }
+    const f32 id = 1.0f / det;
+    out[0][0] = (e * i - f * h) * id;
+    out[0][1] = (c * h - b * i) * id;
+    out[0][2] = (b * f - c * e) * id;
+    out[1][0] = (f * g - d * i) * id;
+    out[1][1] = (a * i - c * g) * id;
+    out[1][2] = (c * d - a * f) * id;
+    out[2][0] = (d * h - e * g) * id;
+    out[2][1] = (b * g - a * h) * id;
+    out[2][2] = (a * e - b * d) * id;
+    for (int r = 0; r < 3; r++) {
+        out[r][3] = -(out[r][0] * m[0][3] + out[r][1] * m[1][3] + out[r][2] * m[2][3]);
+    }
+    return true;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Drawing
 //
@@ -171,6 +208,38 @@ void Packet_c::draw() {
     for (int i = 0; i < kCount; i++) {
         mDrawPos[i] = mPosPrev[i] + (mPos[i] - mPosPrev[i]) * alpha;
         mDrawNrm[i] = normalized(mNrmPrev[i] + (mNrm[i] - mNrmPrev[i]) * alpha, mNrm[i]);
+    }
+    if (mAttachValid && mJointMtx[0] != nullptr && mJointMtx[1] != nullptr) {
+        // Re-place the pinned rows from his joints as they are presented this frame (interpolated
+        // by the game), and carry the rows below along by the same shift, fading out to the hem.
+        Mtx presented[2];
+        const f32 (*jm[2])[4] = {mJointMtx[0], mJointMtx[1]};
+        for (int k = 0; k < 2; k++) {
+            if (dusk::interp::lookup_replacement(mJointMtx[k], presented[k])) {
+                jm[k] = presented[k];
+            }
+        }
+        V3 shift[kCols];
+        for (int r = 0; r < kPinnedRows; r++) {
+            for (int c = 0; c < kCols; c++) {
+                const int i = r * kCols + c;
+                const f32 t = mRowWaist[r];
+                const V3 a = applyMtx(jm[0], mLocChest[i]);
+                const V3 b = applyMtx(jm[1], mLocWaist[i]);
+                const V3 w = a * (1.0f - t) + b * t;
+                if (r == kPinnedRows - 1) {
+                    shift[c] = w - mDrawPos[i];
+                }
+                mDrawPos[i] = w;
+            }
+        }
+        for (int r = kPinnedRows; r < kRows; r++) {
+            const f32 f = 1.0f - static_cast<f32>(r - (kPinnedRows - 1)) /
+                                     static_cast<f32>(kRows - (kPinnedRows - 1));
+            for (int c = 0; c < kCols; c++) {
+                mDrawPos[r * kCols + c] = mDrawPos[r * kCols + c] + shift[c] * f;
+            }
+        }
     }
     refineCloth(*this);
 
@@ -466,6 +535,7 @@ cPhs_Step Cape_c::create() {
     mSimInit = false;
     mLastLinkPos = {0.0f, 0.0f, 0.0f};
     mPacket.mVisible = false;
+    mPacket.mAttachValid = false;
     current.pos = home.pos;  // overwritten every tick once we have a parent
     scale.set(1.0f, 1.0f, 1.0f);
     return cPhs_COMPLEATE_e;
@@ -1072,6 +1142,29 @@ int Cape_c::Execute() {
             mPacket.mPos[i] = smooth ? mPacket.mPos[i] + (mP[i] - mPacket.mPos[i]) *
                 (0.65f - 0.25f * static_cast<f32>(r - kRigid) / static_cast<f32>(kRows - 1 - kRigid)) : mP[i];
             mPacket.mNrm[i] = normalized(gridNormal(r, c) * sign, back);
+        }
+    }
+    // Store the pinned rows relative to his chest and waist joints (see Packet_c::draw).
+    {
+        MtxP mc = link->mpLinkModel->getAnmMtx(2);
+        MtxP mw = link->mpLinkModel->getAnmMtx(16);
+        f32 ic[3][4];
+        f32 iw[3][4];
+        if (invertAffine(mc, ic) && invertAffine(mw, iw)) {
+            for (int r = 0; r < kPinnedRows; r++) {
+                const f32 y = 140.0f + (103.0f - 140.0f) * static_cast<f32>(r) / (kPinnedRows - 1);
+                f32 t = (124.0f - y) / 21.0f;
+                t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+                mPacket.mRowWaist[r] = t * t * (3.0f - 2.0f * t);  // same weights as tools/gen_body_data.py
+                for (int c = 0; c < kCols; c++) {
+                    const int i = r * kCols + c;
+                    mPacket.mLocChest[i] = applyMtx(ic, mPacket.mPos[i]);
+                    mPacket.mLocWaist[i] = applyMtx(iw, mPacket.mPos[i]);
+                }
+            }
+            mPacket.mJointMtx[0] = mc;
+            mPacket.mJointMtx[1] = mw;
+            mPacket.mAttachValid = true;
         }
     }
     if (mPacket.mSnap) {

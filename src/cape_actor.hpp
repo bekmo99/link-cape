@@ -15,6 +15,7 @@ namespace lnkcape {
 constexpr int kCols = 13;
 constexpr int kRows = 16;
 constexpr int kCount = kCols * kRows;
+constexpr int kPinnedRows = 6;  // rows carried rigidly by his body (the simulation's kRigid + 1)
 
 // The cloth is drawn subdivided (Catmull-Rom through the simulated points) so the surface is smooth.
 constexpr int kSub = 3;
@@ -64,6 +65,16 @@ public:
     double mDrawEma = 1.0;       // average number of draws per tick
     bool mInterpOn = false;      // blend between ticks (only when the game draws more than once per tick)
     bool mSnap = true;           // next tick: don't interpolate from stale data
+
+    // The pinned rows are stored relative to his chest and waist joints, so at draw time they can be
+    // placed with the game's own frame-interpolated joint matrices. That keeps the top of the cape
+    // exactly on his back between ticks (blending cloth positions by wall-clock time could never
+    // match the body's own interpolation, and the cape lagged behind / rubber-banded).
+    const f32 (*mJointMtx[2])[4] = {nullptr, nullptr};
+    V3 mLocChest[kPinnedRows * kCols];
+    V3 mLocWaist[kPinnedRows * kCols];
+    f32 mRowWaist[kPinnedRows] = {};  // how much each pinned row follows the waist (rest: chest)
+    bool mAttachValid = false;
 };
 
 class Cape_c : public fopAc_ac_c {

@@ -869,6 +869,22 @@ int Cape_c::Execute() {
                          (kRows - 1 - kRigid);
     const f32 groundY = link->current.pos.y + 2.0f;
     const V3 mid = rest[kRigid * kCols + kCols / 2];
+    // The pinned part follows the lean of his back (leaning forward running, it slopes backward
+    // going down). Hanging the cloth straight down from the belt made a sharp bend there, so the
+    // slope is carried on below the belt and eased out over the next few rows: one smooth curve.
+    f32 leanOff[kRows] = {};
+    {
+        const V3 dPin = normalized(rest[kRigid * kCols + kCols / 2] - rest[(kRigid - 1) * kCols + kCols / 2], up * -1.0f);
+        const f32 downPart = -dot(dPin, up);
+        f32 slope = dot(dPin, back) / (downPart > 0.3f ? downPart : 0.3f);
+        slope = slope < -0.3f ? -0.3f : (slope > 1.0f ? 1.0f : slope);
+        for (int r = kRigid + 1; r < kRows; r++) {
+            const f32 j = static_cast<f32>(r - kRigid);
+            f32 e = 1.0f - (j - 0.5f) / 5.0f;
+            e = e < 0.0f ? 0.0f : e;
+            leanOff[r] = leanOff[r - 1] + vRestLow * slope * e * std::sqrt(e);
+        }
+    }
     for (int r = kRigid + 1; r < kRows; r++) {
         const f32 k = static_cast<f32>(r - kRigid);
         const f32 widen = 1.0f + kWiden * k / (kRows - 1 - kRigid);
@@ -881,7 +897,7 @@ int Cape_c::Execute() {
         for (int c = 0; c < kCols; c++) {
             const V3& h = rest[kRigid * kCols + c];
             const f32 depth = kEnvDepth[y0][c] * (1.0f - fy) + kEnvDepth[y0 + 1][c] * fy;
-            V3 p = h + (h - mid) * (widen - 1.0f) + up * (-vRestLow * k) + back * depth;
+            V3 p = h + (h - mid) * (widen - 1.0f) + up * (-vRestLow * k) + back * (depth + leanOff[r]);
             resolveBody(p, 2);
             if (p.y < groundY) {
                 p.y = groundY;

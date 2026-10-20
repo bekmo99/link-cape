@@ -392,11 +392,7 @@ static bool collideBoxInward(V3& p, const Box& b, const V3& back, V3& nOut) {
     }
     const f32 lo[3] = {b.mn.x, b.mn.y, b.mn.z};
     const f32 hi[3] = {b.mx.x, b.mx.y, b.mx.z};
-    for (int k = 0; k < 3; k++) {
-        if (l[k] <= lo[k] || l[k] >= hi[k]) {
-            return false;
-        }
-    }
+    // The face of the box that faces his body (the most "inward" one) is where the cloth goes.
     int bestK = 0;
     f32 bestDir = 1.0f;
     f32 bestDot = 1e30f;
@@ -411,10 +407,28 @@ static bool collideBoxInward(V3& p, const Box& b, const V3& back, V3& nOut) {
         }
     }
     const f32 s = b.scale[bestK] > 1e-4f ? b.scale[bestK] : 1.0f;
+    // Inside the box's footprint (the other two axes), cloth anywhere from the body-side face out
+    // to a margin behind the gear's outer face is pulled onto that body-side face. The margin
+    // means a fast-moving point can't skip over a thin sheath in one step and end up drawn on top.
+    const f32 margin = 10.0f / s;
+    for (int k = 0; k < 3; k++) {
+        if (k == bestK) {
+            const f32 inner = bestDir > 0.0f ? hi[k] : lo[k];
+            const f32 outer = bestDir > 0.0f ? lo[k] - margin : hi[k] + margin;
+            const f32 mn = std::min(inner, outer);
+            const f32 mx = std::max(inner, outer);
+            if (l[k] <= mn || l[k] >= mx) {
+                return false;
+            }
+        } else if (l[k] <= lo[k] || l[k] >= hi[k]) {
+            return false;
+        }
+    }
+    // How far the cloth must move along nOut to reach the body-side face.
     const f32 dist = (bestDir > 0.0f ? hi[bestK] - l[bestK] : l[bestK] - lo[bestK]) * s;
     nOut = b.axis[bestK] * bestDir;
-    // Fade the push in over a few units from the box's other faces, so cloth near the edge of a
-    // shield / sheath is eased aside instead of jumping to the far side (that made it warp).
+    // Fade the push in over a few units from the box's other faces, so cloth near the edge of the
+    // gear is eased aside instead of jumping.
     f32 edge = 1e30f;
     for (int k = 0; k < 3; k++) {
         if (k == bestK) {
@@ -594,7 +608,7 @@ int Cape_c::Execute() {
     Box allBoxes[kMaxBoxes];
     int allCount = 0;
     if (link->checkShieldGet()) {
-        addModelBoxes(link->mShieldModel, 0.0f, allBoxes, allCount);
+        // (The shield's box is large and made the cloth under it dent in, so it is not used.)
     }
     if (link->checkSwordGet()) {
         addModelBoxes(link->mSheathModel, 0.0f, allBoxes, allCount);

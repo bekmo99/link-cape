@@ -717,6 +717,32 @@ int Cape_c::Execute() {
         }
     }
 
+    // --- Rolling --------------------------------------------------------------------------------
+    // The hanging part normally hangs straight down in the world, behind his yaw. In a roll his body
+    // turns head over heels, and the tail of the cape has to go around with him instead of staying
+    // put in the world. While rolling (smoothed in and out) "down" and "back" for the hanging part
+    // are blended toward the axes of his own waist, which turn with the body.
+    {
+        const u16 proc = link->mProcID;
+        const bool rolling = proc == daAlink_c::PROC_FRONT_ROLL ||
+                             proc == daAlink_c::PROC_FRONT_ROLL_CRASH ||
+                             proc == daAlink_c::PROC_FRONT_ROLL_SUCCESS ||
+                             proc == daAlink_c::PROC_SIDE_ROLL;
+        const f32 goal = rolling ? 1.0f : 0.0f;
+        mRollW += (goal - mRollW) * (goal > mRollW ? 0.45f : 0.1f);
+        if (mRollW < 0.002f) {
+            mRollW = 0.0f;
+        }
+    }
+    const f32 rollW = mRollW;
+    V3 upv = up;
+    V3 bk = back;
+    if (rollW > 0.0f) {
+        upv = normalized(up + (fr[2].y - up) * rollW, up);
+        bk = normalized(back + (fr[2].z * -1.0f - back) * rollW, back);
+        bk = normalized(bk - upv * dot(bk, upv), back);
+    }
+
     // Body spheres in world space
     // The spheres are low-pass filtered over time: the tunic flap and legs swing quickly, and
     // letting the cloth chase every twitch made the hem warp.
@@ -766,10 +792,10 @@ int Cape_c::Execute() {
         V3 n;
         for (int pass = 0; pass < passes; pass++) {
             for (int k = 0; k < boxCount; k++) {
-                collideBoxInward(p, boxes[k], back, n);
+                collideBoxInward(p, boxes[k], bk, n);
             }
             for (int k = 0; k < kBodySphereCount; k++) {
-                collideSphere(p, spheres[k], back);
+                collideSphere(p, spheres[k], bk);
             }
         }
     };
@@ -927,9 +953,9 @@ int Cape_c::Execute() {
     // from that angle (see the flare curve below) so there is no corner at the belt.
     f32 theta0 = 0.0f;
     {
-        const V3 dPin = normalized(rest[kRigid * kCols + kCols / 2] - rest[(kRigid - 1) * kCols + kCols / 2], up * -1.0f);
-        const f32 downPart = -dot(dPin, up);
-        theta0 = std::atan2(dot(dPin, back), downPart > 0.05f ? downPart : 0.05f);
+        const V3 dPin = normalized(rest[kRigid * kCols + kCols / 2] - rest[(kRigid - 1) * kCols + kCols / 2], upv * -1.0f);
+        const f32 downPart = -dot(dPin, upv);
+        theta0 = std::atan2(dot(dPin, bk), downPart > 0.05f ? downPart : 0.05f);
         theta0 = theta0 < -0.3f ? -0.3f : (theta0 > 0.9f ? 0.9f : theta0);
     }
     for (int r = kRigid + 1; r < kRows; r++) {
@@ -944,7 +970,7 @@ int Cape_c::Execute() {
         for (int c = 0; c < kCols; c++) {
             const V3& h = rest[kRigid * kCols + c];
             const f32 depth = kEnvDepth[y0][c] * (1.0f - fy) + kEnvDepth[y0 + 1][c] * fy;
-            V3 p = h + (h - mid) * (widen - 1.0f) + up * (-vRestLow * k) + back * depth;
+            V3 p = h + (h - mid) * (widen - 1.0f) + upv * (-vRestLow * k) + bk * depth;
             resolveBody(p, 2);
             if (p.y < groundY) {
                 p.y = groundY;
@@ -1064,7 +1090,7 @@ int Cape_c::Execute() {
     // the hanging part, curving gradually back toward the hem. The cloth is drawn toward this
     // curve ("target") instead of toward a plain vertical hang, and gravity is partly held off by
     // the same amount, so it streams out instead of folding down at a sharp bend.
-    const f32 flare = std::min(1.0f, mStream / (kRunStream * 12.0f));
+    const f32 flare = std::min(1.0f, mStream / (kRunStream * 12.0f)) * (1.0f - 0.7f * rollW);
     V3 target[kCount];
     {
         // One smooth curve: the angle from vertical grows steadily from the angle his back has at
@@ -1090,7 +1116,7 @@ int Cape_c::Execute() {
         for (int r = 0; r < kRows; r++) {
             for (int c = 0; c < kCols; c++) {
                 const int i = r * kCols + c;
-                target[i] = rest[i] + back * offBack[r] + up * offUp[r];
+                target[i] = rest[i] + bk * offBack[r] + upv * offUp[r];
             }
         }
     }
@@ -1113,9 +1139,10 @@ int Cape_c::Execute() {
             // The hem is looser than the top of the hanging part: it is pulled back to the resting
             // shape less and streams out more, so the bottom flows.
             const f32 loose = rowT * rowT;
-            const f32 gravity = kGravity * (1.0f - flare * 0.95f * std::pow(rowT, 0.6f));
-            p = p + vel + V3{0.0f, -gravity, 0.0f} + back * (stream * (0.3f + 1.2f * loose));
-            p = p + (target[i] - p) * (spring * (1.0f - 0.85f * loose) + flare * 0.05f * loose);
+            const f32 gravity = kGravity * (1.0f - flare * 0.95f * std::pow(rowT, 0.6f)) * (1.0f - rollW);
+            p = p + vel + V3{0.0f, -gravity, 0.0f} + bk * (stream * (0.3f + 1.2f * loose) * (1.0f - rollW));
+            // In a roll the tail is pulled firmly along with the body.
+            p = p + (target[i] - p) * (spring * (1.0f - 0.85f * loose) + flare * 0.05f * loose + rollW * (0.2f + 0.2f * loose));
         }
     }
 
@@ -1163,16 +1190,16 @@ int Cape_c::Execute() {
                 bool hit = false;
                 V3 n;
                 for (int k = 0; k < boxCount; k++) {
-                    if (collideBoxInward(p, boxes[k], back, n)) {
+                    if (collideBoxInward(p, boxes[k], bk, n)) {
                         hit = true;
                         hitN = hitN + n;
                     }
                 }
                 const V3 preSphere = p;
                 for (int k = 0; k < kBodySphereCount; k++) {
-                    if (collideSphere(p, spheres[k], back)) {
+                    if (collideSphere(p, spheres[k], bk)) {
                         hit = true;
-                        hitN = hitN + back;
+                        hitN = hitN + bk;
                     }
                 }
                 p = preSphere + (p - preSphere) * push;
@@ -1226,7 +1253,7 @@ int Cape_c::Execute() {
             for (int c = 0; c < kCols; c++) {
                 V3& p = mP[r * kCols + c];
                 for (int k = 0; k < kBodySphereCount; k++) {
-                    collideSphere(p, spheres[k], back);
+                    collideSphere(p, spheres[k], bk);
                 }
                 if (p.y < groundY) {
                     p.y = groundY;

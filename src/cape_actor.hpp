@@ -108,6 +108,7 @@ private:
     int mSwimTicks = 0;      // debounce counter for the in-water state
     f32 mSwimTime = 0.0f;    // ticks spent in water (drives the gentle sway)
     bool mSwimMode = false;  // in water: the whole cape is released and floats on the surface
+    f32 mRollW = 0.0f;       // 0..1, how much he is rolling: the hanging part turns with his body
     // Which column of the spine / chest / waist joint matrices is "side" and "up", worked out once
     // while he stands still (index 0 = spine, 1 = chest, 2 = waist). Lets the pinned top follow the
     // real orientation of those joints, twist included.

@@ -118,28 +118,52 @@ static void initTexture() {
     sTexInit = true;
 }
 
-static void submitCloth(const Packet_c& pk, bool inside) {
-    const f32 ns = inside ? -1.0f : 1.0f;
-    GXBegin(GX_TRIANGLES, GX_VTXFMT0, (kRefRows - 1) * (kRefCols - 1) * 6);
-    for (int r = 0; r < kRefRows - 1; r++) {
-        for (int c = 0; c < kRefCols - 1; c++) {
-            const int i00 = r * kRefCols + c;
-            const int i01 = i00 + 1;
-            const int i10 = i00 + kRefCols;
-            const int i11 = i10 + 1;
-            const int order[6] = {i00, i10, i11, i00, i11, i01};
-            const int flipped[6] = {i00, i11, i10, i00, i01, i11};
-            const int* idx = pk.mFlip ? flipped : order;
-            for (int k = 0; k < 6; k++) {
-                const int i = idx[k];
-                const V3& p = pk.mRefPos[i];
-                const V3& n = pk.mRefNrm[i];
-                GXPosition3f32(p.x, p.y, p.z);
-                GXNormal3f32(n.x * ns, n.y * ns, n.z * ns);
-                GXTexCoord2f32(static_cast<f32>(i % kRefCols) / (kRefCols - 1),
-                    static_cast<f32>(i / kRefCols) / (kRefRows - 1));
+// The renderer copies every vertex it is given into a fixed-size per-frame buffer (5 MiB) and
+// aborts the whole game when that buffer is full. Sending the cloth as plain triangles costs
+// 9720 vertices per pass (about 300 KB each, twice per frame), which pushed busy scenes over the
+// limit. Each vertex is therefore sent once and the triangles are described by an index list.
+constexpr int kRefVerts = kRefRows * kRefCols;
+constexpr int kRefIndices = (kRefRows - 1) * (kRefCols - 1) * 6;
+static_assert(kRefVerts < 65536, "vertex count must fit the 16-bit index type");
+static u16 sIndices[2][kRefIndices];
+static bool sIndicesInit = false;
+
+static void initIndices() {
+    if (sIndicesInit) {
+        return;
+    }
+    for (int flip = 0; flip < 2; flip++) {
+        int n = 0;
+        for (int r = 0; r < kRefRows - 1; r++) {
+            for (int c = 0; c < kRefCols - 1; c++) {
+                const int i00 = r * kRefCols + c;
+                const int i01 = i00 + 1;
+                const int i10 = i00 + kRefCols;
+                const int i11 = i10 + 1;
+                const int order[6] = {i00, i10, i11, i00, i11, i01};
+                const int flipped[6] = {i00, i11, i10, i00, i01, i11};
+                const int* idx = flip ? flipped : order;
+                for (int k = 0; k < 6; k++) {
+                    sIndices[flip][n++] = static_cast<u16>(idx[k]);
+                }
             }
         }
+    }
+    sIndicesInit = true;
+}
+
+static void submitCloth(const Packet_c& pk, bool inside) {
+    initIndices();
+    const f32 ns = inside ? -1.0f : 1.0f;
+    GXBeginIndexed(GX_VTXFMT0, static_cast<u16>(kRefVerts), sIndices[pk.mFlip ? 1 : 0],
+        static_cast<u32>(kRefIndices));
+    for (int i = 0; i < kRefVerts; i++) {
+        const V3& p = pk.mRefPos[i];
+        const V3& n = pk.mRefNrm[i];
+        GXPosition3f32(p.x, p.y, p.z);
+        GXNormal3f32(n.x * ns, n.y * ns, n.z * ns);
+        GXTexCoord2f32(static_cast<f32>(i % kRefCols) / (kRefCols - 1),
+            static_cast<f32>(i / kRefCols) / (kRefRows - 1));
     }
     GXEnd();
 }

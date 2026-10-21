@@ -1356,7 +1356,22 @@ int Cape_c::Draw() {
     }
     g_env_light.settingTevStruct(10, &current.pos, &tevStr);  // 10 = human Link lighting
     mPacket.mTevStr = &tevStr;
-    j3dSys.getDrawBuffer(0)->entryImm(&mPacket, 0);
+    // entryImm links the packet into the frame's draw list through its own "next" pointer. When
+    // several game ticks run without a frame being drawn (stage loads, warps, respawns) this
+    // is called again while the packet is still queued, which would make the packet point at
+    // itself; the renderer then draws it forever and runs out of buffer space (the crash seen
+    // after warping and respawning). Queue it only once per list.
+    J3DDrawBuffer* drawBuf = j3dSys.getDrawBuffer(0);
+    int guard = 0;
+    for (J3DPacket* p = drawBuf->mpBuffer[0]; p != nullptr && guard < 200000;
+         p = p->getNextPacket(), guard++)
+    {
+        if (p == &mPacket) {
+            return 1;
+        }
+    }
+    mPacket.setNextPacket(nullptr);
+    drawBuf->entryImm(&mPacket, 0);
     return 1;
 }
 
